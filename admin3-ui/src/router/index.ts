@@ -59,6 +59,30 @@ const routes: RouteRecordRaw[] = [
         component: () => import(/* webpackChunkName: "dashboard" */ '../views/storage-list.vue'),
       },
       {
+        path: '/bank-statements',
+        name: 'bankStatements',
+        meta: {
+          title: '银行流水',
+        },
+        component: () => import(/* webpackChunkName: "bankStatement" */ '../views/bank-statement-list.vue'),
+      },
+      {
+        path: '/bank-statement-analysis',
+        name: 'bankStatementAnalysis',
+        meta: {
+          title: '流水单分析',
+        },
+        component: () => import(/* webpackChunkName: "bankStatement" */ '../views/bank-statement-analysis.vue'),
+      },
+      {
+        path: '/bank-statements/:id/transactions',
+        name: 'bankStatementTransactions',
+        meta: {
+          title: '流水明细',
+        },
+        component: () => import(/* webpackChunkName: "bankStatement" */ '../views/bank-statement-transactions.vue'),
+      },
+      {
         path: '/tabs',
         name: 'tabs',
         meta: {
@@ -101,7 +125,7 @@ const router = createRouter({
 });
 
 router.beforeEach(async (to, from, next) => {
-  document.title = `${to.meta.title} | Admin3后台管理系统`;
+  document.title = `${to.meta.title} | 账单流水分析系统`;
   const token = localStorage.getItem('token');
   const basicStore = useBasicStore();
   if (!token && to.path !== '/login') {

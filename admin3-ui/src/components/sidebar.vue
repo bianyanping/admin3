@@ -1,9 +1,10 @@
 <template>
-  <div class="sidebar">
+  <div class="sidebar" :class="{ 'sidebar-mobile-closed': sidebar.isMobile && sidebar.collapse }">
     <el-menu
         class="sidebar-el-menu"
         :default-active="onRoutes"
-        :collapse="sidebar.collapse"
+        :collapse="!sidebar.isMobile && sidebar.collapse"
+        @select="handleMenuSelect"
         background-color="#324157"
         text-color="#bfcbd9"
         active-text-color="#20a0ff"
@@ -98,6 +99,13 @@ const onRoutes = computed(() => {
 });
 
 const sidebar = useSidebarStore();
+
+// 移动端选中菜单后自动收起抽屉
+const handleMenuSelect = () => {
+  if (sidebar.isMobile) {
+    sidebar.collapse = true;
+  }
+};
 </script>
 
 <style scoped>
@@ -120,5 +128,21 @@ const sidebar = useSidebarStore();
 
 .sidebar > ul {
   height: 100%;
+}
+
+/* 移动端：抽屉式侧边栏，覆盖在内容之上，由父组件遮罩配合 */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    z-index: 2001;
+    background-color: #324157;
+    transition: transform .3s ease-in-out;
+  }
+
+  .sidebar-mobile-closed {
+    transform: translateX(-100%);
+  }
 }
 </style>

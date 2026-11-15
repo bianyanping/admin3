@@ -1,0 +1,35 @@
+spring:
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/admin3?characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    username: ${DB_USERNAME:admin3}
+    password: ${DB_PASSWORD}
+  jpa:
+    show-sql: false
+    hibernate:
+      # 首次部署用 update 自动建表；稳定后可改为 validate
+      ddl-auto: update
+  sql:
+    init:
+      # 生产环境不要每次启动都跑 data.sql
+      # 首次部署初始化数据时，用命令行临时覆盖为 always
+      mode: never
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+server:
+  port: 8080
+  servlet:
+    context-path: /admin3
+
+logging:
+  level:
+    root: info
+  file:
+    name: /opt/admin3/logs/admin3.log
+wechat:
+  miniapp:
+    # 微信小程序 AppID；AppSecret 通过环境变量注入，不要写进代码库
+    appid: wx7ae4bc2cdb849451
+    secret: ${WECHAT_MINIAPP_SECRET:}

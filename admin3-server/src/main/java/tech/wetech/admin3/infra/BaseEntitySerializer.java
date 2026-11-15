@@ -1,5 +1,6 @@
 package tech.wetech.admin3.infra;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.ser.std.StdSerializer;
@@ -26,7 +27,9 @@ public class BaseEntitySerializer extends StdSerializer<BaseEntity> {
 
   public final static BaseEntitySerializer instance = new BaseEntitySerializer(BaseEntity.class);
 
-  private final List<Class<? extends Annotation>> IGNORE_ANNOTATIONS = Arrays.asList(ElementCollection.class, OneToMany.class, OneToOne.class, ManyToOne.class, ManyToMany.class, Embedded.class);
+  private final List<Class<? extends Annotation>> IGNORE_ANNOTATIONS = Arrays.asList(
+    ElementCollection.class, OneToMany.class, OneToOne.class, ManyToOne.class, ManyToMany.class,
+    Embedded.class, JsonIgnore.class);
 
   protected BaseEntitySerializer(Class<BaseEntity> t) {
     super(t);

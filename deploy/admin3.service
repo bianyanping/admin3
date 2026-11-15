@@ -1,0 +1,23 @@
+[Unit]
+Description=Admin3 Bank Statement Server
+After=network.target mysqld.service
+Wants=mysqld.service
+
+[Service]
+Type=simple
+User=admin3
+Group=admin3
+WorkingDirectory=/opt/admin3
+EnvironmentFile=/opt/admin3/admin3.env
+ExecStart=/usr/bin/java -Xms512m -Xmx1024m -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai \
+  -jar /opt/admin3/admin3-server.jar \
+  --spring.profiles.active=prod \
+  --spring.config.additional-location=file:/opt/admin3/
+Restart=on-failure
+RestartSec=10
+SuccessExitStatus=143
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

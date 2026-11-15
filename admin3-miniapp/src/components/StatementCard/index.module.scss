@@ -1,0 +1,113 @@
+@use '@/styles/variables.scss' as *;
+
+.card {
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  box-shadow: $shadow-card;
+  transition: all $transition-base;
+
+  &:active {
+    opacity: 0.94;
+    transform: scale(0.99);
+  }
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.bank {
+  flex: 1;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.count {
+  flex: none;
+  margin-left: $spacing-sm;
+  padding: 4rpx 16rpx;
+  font-size: $font-size-xs;
+  color: $color-primary;
+  background: rgba(22, 93, 255, 0.08);
+  border-radius: $radius-round;
+  white-space: nowrap;
+}
+
+.holder {
+  display: block;
+  margin-top: $spacing-sm;
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+  @include text-ellipsis;
+}
+
+.account {
+  display: block;
+  margin-top: 4rpx;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  letter-spacing: 1rpx;
+}
+
+.period {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: $spacing-sm;
+}
+
+.periodText {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.currency {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.amountRow {
+  display: flex;
+  align-items: center;
+  margin-top: $spacing-md;
+  padding-top: $spacing-md;
+  border-top: 1rpx solid $color-divider;
+}
+
+.amountItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.divider {
+  width: 1rpx;
+  height: 56rpx;
+  background: $color-divider;
+  margin: 0 $spacing-md;
+}
+
+.amountLabel {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.income {
+  margin-top: 4rpx;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-income;
+}
+
+.expense {
+  margin-top: 4rpx;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-expense;
+}

@@ -3,8 +3,10 @@ package tech.wetech.admin3.sys.repository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 import tech.wetech.admin3.sys.model.Organization;
 import tech.wetech.admin3.sys.model.User;
 
@@ -28,4 +30,20 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
   @Query("select count(user.id) from User user where user.organization=:organization or user.organization.parentIds like concat(:orgParentIds, '%')")
   long countOrgUsers(Organization organization, String orgParentIds);
+
+  @Query("select u.organization.id from User u where u.id = :userId and u.organization is not null")
+  java.util.Optional<Long> findOrgIdByUserId(Long userId);
+
+  @Query("select u.organization.name from User u where u.id = :userId and u.organization is not null")
+  java.util.Optional<String> findOrgNameByUserId(Long userId);
+
+  java.util.Optional<User> findByWxOpenid(String wxOpenid);
+
+  /**
+   * 清理用户与角色的关联（用户删除前调用）。
+   */
+  @Transactional
+  @Modifying
+  @Query(value = "delete from user_role where user_id = :userId", nativeQuery = true)
+  void deleteUserRoles(Long userId);
 }

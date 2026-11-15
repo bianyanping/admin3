@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class LocalSessionManager implements SessionManager {
 
-  private static final long EXPIRE_DAYS = 7;
+  private static final long EXPIRE_HOURS = 2;
 
   private final SessionRepository sessionRepository;
 
@@ -35,7 +35,7 @@ public class LocalSessionManager implements SessionManager {
 
   private final Cache<String, Session> cache = Caffeine.newBuilder()
     .initialCapacity(100)
-    .expireAfterAccess(EXPIRE_DAYS, TimeUnit.DAYS)
+    .expireAfterAccess(EXPIRE_HOURS, TimeUnit.HOURS)
     .build();
 
   private final ScheduledExecutorService sessionCheckExecutor = new ScheduledThreadPoolExecutor(1);
@@ -59,7 +59,7 @@ public class LocalSessionManager implements SessionManager {
       } catch (Exception e) {
         log.error("{}", e.getMessage(), e);
       }
-    }, 5, 5, TimeUnit.SECONDS);
+    }, 5, 5, TimeUnit.MINUTES);
   }
 
   @Override
@@ -70,7 +70,7 @@ public class LocalSessionManager implements SessionManager {
   }
 
   private static LocalDateTime getLatestExpireTime() {
-    return LocalDateTime.now().plus(EXPIRE_DAYS, ChronoUnit.DAYS);
+    return LocalDateTime.now().plus(EXPIRE_HOURS, ChronoUnit.HOURS);
   }
 
 

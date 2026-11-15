@@ -1,0 +1,60 @@
+@use '@/styles/variables.scss' as *;
+
+.item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid $color-divider;
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.left {
+  flex: 1;
+  min-width: 0;
+  padding-right: $spacing-md;
+}
+
+.title {
+  display: block;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.meta {
+  display: block;
+  margin-top: 6rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  @include text-ellipsis;
+}
+
+.right {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.income {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-income;
+}
+
+.expense {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-expense;
+}
+
+.balance {
+  margin-top: 6rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}

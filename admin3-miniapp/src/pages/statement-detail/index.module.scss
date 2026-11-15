@@ -1,0 +1,187 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  padding: $spacing-md $page-padding $spacing-xl;
+  background: $color-bg-page;
+}
+
+/* ===== 概要卡 ===== */
+.summaryCard {
+  padding: $spacing-lg;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  box-shadow: $shadow-card;
+}
+
+.bank {
+  display: block;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.holder {
+  display: block;
+  margin-top: $spacing-xs;
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+  @include text-ellipsis;
+}
+
+.account {
+  display: block;
+  margin-top: 4rpx;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  letter-spacing: 1rpx;
+}
+
+.periodRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: $spacing-sm;
+}
+
+.period {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.count {
+  padding: 4rpx 16rpx;
+  font-size: $font-size-xs;
+  color: $color-primary;
+  background: rgba(22, 93, 255, 0.08);
+  border-radius: $radius-round;
+  white-space: nowrap;
+}
+
+.amountRow {
+  display: flex;
+  align-items: center;
+  margin-top: $spacing-md;
+  padding-top: $spacing-md;
+  border-top: 1rpx solid $color-divider;
+}
+
+.amountItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.amountLine {
+  width: 1rpx;
+  height: 64rpx;
+  background: $color-divider;
+}
+
+.amountLabel {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.income {
+  margin-top: 6rpx;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-income;
+}
+
+.expense {
+  margin-top: 6rpx;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-expense;
+}
+
+/* ===== 筛选 ===== */
+.filterRow {
+  display: flex;
+  gap: $spacing-sm;
+  margin-top: $spacing-md;
+}
+
+.filterItem {
+  padding: 10rpx $spacing-lg;
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  border-radius: $radius-round;
+  transition: all $transition-fast;
+}
+
+.filterItemActive {
+  background: rgba(22, 93, 255, 0.08);
+  border-color: $color-primary;
+}
+
+.filterText {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  white-space: nowrap;
+}
+
+.filterTextActive {
+  color: $color-primary;
+  font-weight: $font-weight-medium;
+}
+
+.searchBox {
+  margin-top: $spacing-md;
+  padding: 0 $spacing-md;
+  height: $button-height-md;
+  display: flex;
+  align-items: center;
+  background: $color-bg-card;
+  border-radius: $radius-round;
+  box-shadow: $shadow-card;
+}
+
+.searchInput {
+  flex: 1;
+  height: 100%;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.placeholder {
+  color: $color-text-tertiary;
+}
+
+/* ===== 列表 ===== */
+.listHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: $spacing-md 0 $spacing-xs;
+}
+
+.listTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.listCount {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.listCard {
+  padding: 0 $spacing-lg;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  box-shadow: $shadow-card;
+}
+
+.loadingText {
+  display: block;
+  padding: $spacing-lg 0;
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}

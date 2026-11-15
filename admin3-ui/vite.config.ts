@@ -23,6 +23,11 @@ export default defineConfig({
 			'/admin3': {
 				target: `http://localhost:8080`,
 			},
+			// 头像等文件访问地址为 storage/fetch/xxx（不带 /admin3 前缀），开发环境需要代理
+			'/storage': {
+				target: `http://localhost:8080`,
+				rewrite: (p) => '/admin3' + p,
+			},
 		},
 	},
 	optimizeDeps: {

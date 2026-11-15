@@ -42,13 +42,13 @@ public class OrganizationController {
   @RequiresPermissions("user:view")
   @GetMapping("/tree")
   public ResponseEntity<List<OrgTreeDTO>> findOrgTree(Long parentId) {
-    return ResponseEntity.ok(organizationService.findOrgTree(parentId));
+    return ResponseEntity.ok(organizationService.findOrgTreeInScope(parentId));
   }
 
   @RequiresPermissions("user:view")
   @GetMapping("/{organizationId}/users")
   public ResponseEntity<PageDTO<OrgUserDTO>> findOrgUsers(Pageable pageable, @RequestParam(required = false) String username, @RequestParam(required = false) User.State state, @PathVariable Long organizationId) {
-    Organization organization = organizationService.findOrganization(organizationId);
+    Organization organization = organizationService.restrictToCurrentUserScope(organizationService.findOrganization(organizationId));
     return ResponseEntity.ok(userService.findOrgUsers(pageable, username, state, organization));
   }
 

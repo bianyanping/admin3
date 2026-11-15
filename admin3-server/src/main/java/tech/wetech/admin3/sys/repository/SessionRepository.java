@@ -29,6 +29,14 @@ public interface SessionRepository extends JpaRepository<Session, Long> {
 
   Optional<Session> findByToken(String token);
 
+  /**
+   * 删除某用户的全部登录会话（用户删除前清理）。
+   */
+  @Transactional
+  @Modifying
+  @Query("delete from Session s where s.credential.user.id = :userId")
+  void deleteByUserId(Long userId);
+
   @Query("from Session")
   Stream<Session> findAllStream();
 }

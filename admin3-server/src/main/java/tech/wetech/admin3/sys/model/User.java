@@ -23,6 +23,12 @@ public class User extends BaseEntity {
 
   private String avatar;
 
+  /**
+   * 微信小程序 openid，绑定后小程序登录即以此身份继承所属组织的可见范围
+   */
+  @Column(length = 64, unique = true)
+  private String wxOpenid;
+
   @Column(nullable = false)
   private Gender gender;
 
@@ -66,11 +72,16 @@ public class User extends BaseEntity {
    * @return
    */
   public Set<String> findPermissions() {
-    return roles.stream()
+    Set<String> permissions = roles.stream()
       .map(Role::getResources)
       .flatMap(Collection::stream)
       .map(Resource::getPermission)
       .collect(Collectors.toSet());
+    // admin 为内置超级管理员，不受角色/权限配置影响
+    if ("admin".equalsIgnoreCase(username)) {
+      permissions.add("*");
+    }
+    return permissions;
   }
 
   public enum Gender {
@@ -100,6 +111,14 @@ public class User extends BaseEntity {
 
   public void setAvatar(String avatar) {
     this.avatar = avatar;
+  }
+
+  public String getWxOpenid() {
+    return wxOpenid;
+  }
+
+  public void setWxOpenid(String wxOpenid) {
+    this.wxOpenid = wxOpenid;
   }
 
   public Gender getGender() {

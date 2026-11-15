@@ -40,14 +40,17 @@ public class UserController {
   @RequiresPermissions("user:create")
   @PostMapping
   public ResponseEntity<User> createUser(@RequestBody @Valid CreateUserRequest request) {
-    Organization organization = organizationService.findOrganization(request.organizationId());
+    // 所属组织必须落在当前用户可见范围内，防止越权挂到上级节点
+    Organization organization = organizationService.restrictToCurrentUserScope(
+      organizationService.findOrganization(request.organizationId()));
     return new ResponseEntity<>(userService.createUser(request.username(), request.avatar(), request.gender(), User.State.NORMAL, organization), HttpStatus.CREATED);
   }
 
   @RequiresPermissions("user:update")
   @PutMapping("/{userId}")
   public ResponseEntity<User> updateUser(@PathVariable Long userId, @RequestBody @Valid UpdateUserRequest request) {
-    Organization organization = organizationService.findOrganization(request.organizationId());
+    Organization organization = organizationService.restrictToCurrentUserScope(
+      organizationService.findOrganization(request.organizationId()));
     return ResponseEntity.ok(userService.updateUser(userId, request.avatar(), request.gender(), User.State.NORMAL, organization));
   }
 
@@ -68,6 +71,30 @@ public class UserController {
   public ResponseEntity<Void> deleteUser(@PathVariable Long userId) {
     userService.delete(userId);
     return ResponseEntity.noContent().build();
+  }
+
+  /**
+   * 管理员重置用户密码为默认密码 123456
+   */
+  @RequiresPermissions("user:update")
+  @PostMapping("/{userId}:reset-password")
+  public ResponseEntity<Void> resetPassword(@PathVariable Long userId) {
+    userService.resetPassword(userId);
+    return ResponseEntity.ok().build();
+  }
+
+  /**
+   * 当前登录用户自助修改密码
+   */
+  @PostMapping("/password")
+  public ResponseEntity<Void> changePassword(@RequestBody @Valid ChangePasswordRequest request) {
+    Long currentUserId = ((tech.wetech.admin3.sys.service.dto.UserinfoDTO)
+      tech.wetech.admin3.common.SessionItemHolder.getItem(tech.wetech.admin3.common.Constants.SESSION_CURRENT_USER)).userId();
+    userService.changePassword(currentUserId, request.oldPassword(), request.newPassword());
+    return ResponseEntity.ok().build();
+  }
+
+  record ChangePasswordRequest(@NotBlank String oldPassword, @NotBlank String newPassword) {
   }
 
   record CreateUserRequest(@NotBlank String username, @NotNull User.Gender gender,

@@ -36,9 +36,28 @@ service.interceptors.response.use(
             localStorage.removeItem('token');
             router.push('/login');
         }
-        // @ts-ignore
-        ElMessage.error(error.response?.data?.message);
-        return Promise.reject();
+        // silent：调用方自己处理错误（如批量上传时统一汇总提示）
+        const silent = (error.config as any)?.silent;
+        const data: any = error.response?.data;
+        const statusText = `请求失败（${error.response?.status || '网络异常'}）`;
+        if (silent) {
+            return Promise.reject(error);
+        }
+        if (data instanceof Blob) {
+            // blob 响应（下载/导出）出错时，错误体也是 Blob，读出 JSON 里的 message 再提示
+            data.text().then((text: string) => {
+                let msg = '';
+                try {
+                    msg = JSON.parse(text)?.message || '';
+                } catch (e) {
+                    msg = text;
+                }
+                ElMessage.error(msg || statusText);
+            });
+        } else {
+            ElMessage.error(data?.message || statusText);
+        }
+        return Promise.reject(error);
     }
 );
 

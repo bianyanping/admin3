@@ -30,6 +30,7 @@
 import VueCropper from 'vue-cropperjs';
 import 'cropperjs/dist/cropper.css';
 import {ref, watch} from "vue";
+import {ElMessage} from "element-plus";
 import {upload} from "../api/storage";
 
 const props = defineProps(['imgSrc']);
@@ -72,6 +73,10 @@ const saveAvatar = () => {
   fetch(cropImg.value)
     .then(response => response.blob())
     .then(blob => {
+      if (!blob || blob.size === 0) {
+        ElMessage.error('裁剪结果为空，请重新选择图片');
+        return;
+      }
       const file = new File([blob], "avatar.png", {type: blob.type})
       upload({files: file}).then(res => {
         emits('onSelect', res.data[0]?.url);

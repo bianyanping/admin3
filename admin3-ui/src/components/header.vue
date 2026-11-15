@@ -9,7 +9,7 @@
         <Fold/>
       </el-icon>
     </div>
-    <div class="logo">Admin3后台管理系统</div>
+    <div class="logo">账单流水分析系统</div>
     <div class="header-right">
       <div class="header-user-con">
         <!-- 消息中心 -->
@@ -48,7 +48,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import {onMounted} from 'vue';
+import {onBeforeUnmount, onMounted} from 'vue';
 import {useSidebarStore} from '../store/sidebar';
 import {useRouter} from 'vue-router';
 import {logout} from "../api/login";
@@ -66,10 +66,23 @@ const collapseChage = () => {
   sidebar.handleCollapse();
 };
 
+// 窄屏（移动端）断点，与 main.css 中的 media query 保持一致
+const mobileQuery = window.matchMedia('(max-width: 768px)');
+const handleMobileChange = (e: MediaQueryListEvent) => {
+  sidebar.setMobile(e.matches);
+};
+
 onMounted(() => {
-  if (document.body.clientWidth < 1500) {
+  if (mobileQuery.matches) {
+    sidebar.setMobile(true);
+  } else if (document.body.clientWidth < 1500) {
     collapseChage();
   }
+  mobileQuery.addEventListener('change', handleMobileChange);
+});
+
+onBeforeUnmount(() => {
+  mobileQuery.removeEventListener('change', handleMobileChange);
 });
 
 // 用户名下拉菜单选择事件
@@ -172,5 +185,39 @@ const handleCommand = (command: string) => {
 
 .el-dropdown-menu__item {
   text-align: center;
+}
+
+@media (max-width: 768px) {
+  .header {
+    font-size: 18px;
+  }
+
+  .collapse-btn {
+    padding: 0 14px;
+  }
+
+  .header .logo {
+    width: auto;
+    max-width: 42vw;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .header-right {
+    padding-right: 12px;
+  }
+
+  .user-avator {
+    margin-left: 10px;
+  }
+
+  .user-name {
+    margin-left: 8px;
+    max-width: 80px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
 }
 </style>

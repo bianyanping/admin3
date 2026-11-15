@@ -1,9 +1,8 @@
 <template>
-  <div>
-    <div class="container">
-      <el-row>
-        <el-col :xl="6" :lg="6" style="border-right: 1px solid #dcdfe6;">
-          <div style="padding-right: 10px">
+  <div class="user-page">
+    <div class="container user-layout">
+      <div class="org-col">
+        <div class="org-panel">
             <div style="margin-bottom: 24px; font-weight: 700">组织架构</div>
             <el-divider></el-divider>
             <el-tree
@@ -12,6 +11,7 @@
               :current-node-key="selectedNode?.id"
               :highlight-current="true"
               :expand-on-click-node="false"
+              :indent="14"
               :default-expanded-keys="defaultExpandedKeys"
               @node-click="handleNodeSelected"
               @node-expand="handleNodeExpand"
@@ -48,22 +48,22 @@
               </span>
               </template>
             </el-tree>
-          </div>
-        </el-col>
-        <el-col :xl="18" :lg="18" style="border-right: 1px solid #dcdfe6">
-          <div style="padding-left: 10px">
+        </div>
+      </div>
+      <div class="user-col">
             <div class="handle-box">
-              <el-input v-model="query.username" placeholder="用户名" class="handle-input mr10" clearable></el-input>
-              <el-select v-model="query.state" placeholder="状态" class="handle-select mr10" clearable>
+              <el-input v-model="query.username" placeholder="用户名" class="handle-input" clearable></el-input>
+              <el-select v-model="query.state" placeholder="状态" class="handle-select" clearable>
                 <el-option key="1" label="正常" value="NORMAL"></el-option>
                 <el-option key="2" label="锁定" value="LOCKED"></el-option>
               </el-select>
               <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
-              <el-button type="primary" :icon="Plus" @click="addVisible = true;Object.assign(form, new User())"
+              <el-button type="primary" :icon="Plus" @click="openAddUser"
                          v-action:user:create>新增
               </el-button>
             </div>
-            <el-table :data="tableData" border class="table" ref="multipleTable" header-cell-class-name="table-header">
+            <div v-if="!isMobile" ref="tableWrap" class="table-wrap">
+            <el-table :data="tableData" :height="tableHeight" border class="table" ref="multipleTable" header-cell-class-name="table-header">
               <el-table-column prop="id" label="ID" width="55" align="center"></el-table-column>
               <el-table-column prop="username" label="用户名"></el-table-column>
               <el-table-column prop="gender" label="性别">
@@ -94,35 +94,108 @@
               </el-table-column>
 
               <el-table-column prop="createdTime" label="注册时间"></el-table-column>
-              <el-table-column prop="orgFullName" label="所属组织"></el-table-column>
-              <el-table-column label="操作" width="300" fixed="right">
+              <el-table-column label="所属组织">
+                <template #default="{ row }">{{ lastOrgName(row.orgFullName) }}</template>
+              </el-table-column>
+              <el-table-column label="操作" width="100" fixed="right" align="center">
                 <template #default="scope">
-                  <el-popconfirm title="确定要禁用?" @confirm="handleDisable(scope.row)">
-                    <template #reference>
-                      <el-button v-if="scope.row.state==='NORMAL'" text :icon="Lock" v-action:user:update>
-                        禁用
-                      </el-button>
+                  <el-dropdown trigger="click" @command="(cmd: string) => handleCommand(cmd, scope.row, scope.$index)">
+                    <el-button text type="primary">
+                      操作<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <span v-action:user:update>
+                          <el-dropdown-item v-if="scope.row.state==='NORMAL'" command="disable" :icon="Lock">
+                            禁用
+                          </el-dropdown-item>
+                        </span>
+                        <span v-action:user:update>
+                          <el-dropdown-item v-if="scope.row.state==='LOCKED'" command="enable" :icon="Unlock">
+                            启用
+                          </el-dropdown-item>
+                        </span>
+                        <span v-action:user:update>
+                          <el-dropdown-item command="edit" :icon="Edit">编辑</el-dropdown-item>
+                        </span>
+                        <span v-action:user:update>
+                          <el-dropdown-item command="resetPassword">重置密码</el-dropdown-item>
+                        </span>
+                        <span v-action:user:delete>
+                          <el-dropdown-item command="delete" :icon="Delete" divided>
+                            <span style="color: #f56c6c">删除</span>
+                          </el-dropdown-item>
+                        </span>
+                      </el-dropdown-menu>
                     </template>
-                  </el-popconfirm>
-                  <el-popconfirm title="确定要启用?" @confirm="handleEnable(scope.row)">
-                    <template #reference>
-                      <el-button v-if="scope.row.state==='LOCKED'" text :icon="Unlock" v-action:user:update>
-                        启用
-                      </el-button>
-                    </template>
-                  </el-popconfirm>
-                  <el-button text :icon="Edit" @click="handleEdit(scope.$index, scope.row)" v-action:user:update>
-                    编辑
-                  </el-button>
-                  <el-button text :icon="Delete" class="red" @click="handleDelete(scope.row)" v-action:user:delete>
-                    删除
-                  </el-button>
+                  </el-dropdown>
                 </template>
               </el-table-column>
             </el-table>
+            </div>
+            <div v-else class="user-cards">
+              <div v-for="(row, idx) in tableData" :key="row.id" class="user-card">
+                <div class="uc-head">
+                  <el-image
+                    class="uc-avatar"
+                    :src="row.avatar"
+                    :preview-src-list="[row.avatar]"
+                    preview-teleported
+                    fit="cover"
+                  ></el-image>
+                  <div class="uc-body">
+                    <div class="uc-name">
+                      <span>{{ row.username }}</span>
+                      <el-tag
+                        size="small"
+                        :type="row.state === 'NORMAL' ? 'success' : row.state === 'LOCKED' ? 'danger' : ''"
+                      >
+                        {{ row.state === 'NORMAL' ? '正常' : row.state === 'LOCKED' ? '锁定' : '' }}
+                      </el-tag>
+                    </div>
+                    <div class="uc-sub">ID {{ row.id }} · {{ row.gender === 'MALE' ? '男' : '女' }}</div>
+                    <div class="uc-sub">{{ lastOrgName(row.orgFullName) || '未分配组织' }}</div>
+                    <div class="uc-sub">{{ row.createdTime }}</div>
+                  </div>
+                </div>
+                <div class="uc-actions">
+                  <el-dropdown trigger="click" @command="(cmd: string) => handleCommand(cmd, row, idx)">
+                    <el-button text type="primary" size="small">
+                      操作<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <span v-action:user:update>
+                          <el-dropdown-item v-if="row.state==='NORMAL'" command="disable" :icon="Lock">
+                            禁用
+                          </el-dropdown-item>
+                        </span>
+                        <span v-action:user:update>
+                          <el-dropdown-item v-if="row.state==='LOCKED'" command="enable" :icon="Unlock">
+                            启用
+                          </el-dropdown-item>
+                        </span>
+                        <span v-action:user:update>
+                          <el-dropdown-item command="edit" :icon="Edit">编辑</el-dropdown-item>
+                        </span>
+                        <span v-action:user:update>
+                          <el-dropdown-item command="resetPassword">重置密码</el-dropdown-item>
+                        </span>
+                        <span v-action:user:delete>
+                          <el-dropdown-item command="delete" :icon="Delete" divided>
+                            <span style="color: #f56c6c">删除</span>
+                          </el-dropdown-item>
+                        </span>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                </div>
+              </div>
+            </div>
             <div class="pagination">
               <el-pagination
                 background
+                :small="isMobile"
                 layout="total, prev, pager, next"
                 :current-page="query.pageIndex"
                 :page-size="query.pageSize"
@@ -130,13 +203,11 @@
                 @current-change="handlePageChange"
               ></el-pagination>
             </div>
-          </div>
-        </el-col>
-      </el-row>
+      </div>
     </div>
 
     <!-- 新增组织架构树 -->
-    <el-dialog title="新增" v-model="addOrgDialogVisible" width="30%">
+    <el-dialog title="新增" v-model="addOrgDialogVisible" width="min(480px, 92vw)">
       <el-form label-width="70px">
         <el-form-item label="上级节点">
           <el-input v-model="orgForm.parentName" disabled></el-input>
@@ -160,7 +231,7 @@
     </el-dialog>
 
     <!-- 编辑组织架构树 -->
-    <el-dialog title="编辑" v-model="updateOrgDialogVisible" width="30%">
+    <el-dialog title="编辑" v-model="updateOrgDialogVisible" width="min(480px, 92vw)">
       <el-form label-width="70px">
         <el-form-item label="上级节点">
           <el-input v-model="orgForm.parentName" disabled></el-input>
@@ -184,10 +255,10 @@
     </el-dialog>
 
     <!-- 新增用户弹出框 -->
-    <el-dialog title="新增" v-model="addVisible" width="30%">
+    <el-dialog title="新增" v-model="addVisible" width="min(480px, 92vw)">
       <el-form label-width="70px">
         <el-form-item label="所属组织">
-          <el-input v-model="selectedNode.name" disabled></el-input>
+          <el-input :model-value="selectedNode?.name || ''" disabled></el-input>
         </el-form-item>
         <el-input v-model="form.avatar" hidden="hidden" v-show="false"></el-input>
         <el-form-item label="用户名">
@@ -211,10 +282,10 @@
       </template>
     </el-dialog>
     <!-- 编辑用户弹出框 -->
-    <el-dialog title="编辑" v-model="editVisible" width="30%">
+    <el-dialog title="编辑" v-model="editVisible" width="min(480px, 92vw)">
       <el-form label-width="70px">
         <el-form-item label="所属组织">
-          <el-input v-model="selectedNode.name" disabled></el-input>
+          <el-input :model-value="selectedNode?.name || ''" disabled></el-input>
         </el-form-item>
         <el-input v-model="form.avatar" hidden="hidden" v-show="false"></el-input>
         <el-form-item label="用户名">
@@ -243,8 +314,10 @@
 <script setup lang="ts">
 import {reactive, ref} from 'vue';
 import {ElMessage, ElMessageBox} from 'element-plus';
-import {Delete, Edit, Lock, Plus, Search, Unlock} from '@element-plus/icons-vue';
-import {createUser, deleteUser, disableUser, enableUser, updateUser} from "../api/user";
+import {useIsMobile} from '../composables/useIsMobile';
+import {useFillHeight} from '../composables/useFillHeight';
+import {ArrowDown, Delete, Edit, Lock, Plus, Search, Unlock} from '@element-plus/icons-vue';
+import {createUser, deleteUser, disableUser, enableUser, resetPassword, updateUser} from "../api/user";
 import {
   createOrganization,
   deleteOrganization,
@@ -252,7 +325,6 @@ import {
   getOrganizationUserList,
   updateOrganization
 } from "../api/organization";
-import cloneDeep from 'lodash/cloneDeep';
 import AvatarUpload from "../components/AvatarUpload.vue";
 
 interface OrgTreeNode {
@@ -274,16 +346,32 @@ enum OrgTypeEum {
   JOB = 'JOB',
 }
 
-const rootNode = {name: '根节点', id: 1, type: OrgTypeEum.DEPART, children: []};
+const treeData = ref<OrgTreeNode[]>([]);
+const defaultExpandedKeys = ref<number[]>([]);
+const selectedNode = ref<OrgTreeNode | null>(null);
 
-const treeData = ref<OrgTreeNode[]>([rootNode]);
-const defaultExpandedKeys = ref<number[]>([1]);
-const selectedNode = ref<OrgTreeNode>(rootNode);
+/** 当前生效的组织节点：优先选中节点，其次树根（均由后端按权限范围返回） */
+const currentOrgNode = (): OrgTreeNode | null => selectedNode.value || treeData.value[0] || null;
 
 const handleNodeSelected = (node: OrgTreeNode) => {
   selectedNode.value = node;
   getUserData();
 }
+
+/** 所属组织只展示最末级名称 */
+const lastOrgName = (fullName?: string) => (fullName ? fullName.split('-').pop() : '');
+
+/** 新增用户：默认归属到当前选中的组织 */
+const openAddUser = () => {
+  const node = currentOrgNode();
+  if (!node) {
+    ElMessage.warning('暂无可用的组织节点');
+    return;
+  }
+  Object.assign(form, new User());
+  form.organizationId = node.id;
+  addVisible.value = true;
+};
 
 const handleNodeExpand = (d: any) => {
   // console.log(d, 'expand')
@@ -292,10 +380,15 @@ const reqAllNodes = async () => {
   const res = await getOrganizationTree({
     parentId: 1
   })
-  treeData.value[0].children = res.data;
+  treeData.value = res.data || [];
+  convertOrgTree(treeData.value);
 
-  const cloneTreeData = cloneDeep(treeData.value);
-  convertOrgTree(cloneTreeData);
+  const selected = currentOrgNode();
+  if (!selected || !treeData.value.some((item) => item.id === selected.id)) {
+    selectedNode.value = treeData.value[0] || null;
+  }
+  defaultExpandedKeys.value = selectedNode.value ? [selectedNode.value.id] : [];
+  getUserData();
 }
 reqAllNodes();
 
@@ -322,12 +415,12 @@ const handleAddOrgNode = (data: OrgTreeNode) => {
   addOrgDialogVisible.value = true;
 }
 
-const handleUpdateOrgNode = (data: OrgTreeNode, parent: OrgTreeNode) => {
+const handleUpdateOrgNode = (data: OrgTreeNode, parent?: OrgTreeNode) => {
   orgForm.id = data.id;
   orgForm.name = data.name;
   orgForm.type = data.type;
-  orgForm.parentId = parent.id;
-  orgForm.parentName = parent.name;
+  orgForm.parentId = parent?.id ?? data.id;
+  orgForm.parentName = parent?.name ?? '';
   updateOrgDialogVisible.value = true;
 }
 
@@ -395,7 +488,13 @@ const tableData = ref<TableItem[]>([]);
 const pageTotal = ref(0);
 // 获取表格数据
 const getUserData = () => {
-  getOrganizationUserList(selectedNode.value.id, {
+  const node = currentOrgNode();
+  if (!node) {
+    tableData.value = [];
+    pageTotal.value = 0;
+    return;
+  }
+  getOrganizationUserList(node.id, {
     page: query.pageIndex,
     size: query.pageSize,
     username: query.username || undefined,
@@ -408,6 +507,11 @@ const getUserData = () => {
 getUserData();
 
 // 查询操作
+const isMobile = useIsMobile();
+// 桌面端：用户表格高度跟随容器，数据多时表格内部滚动，页面不出现上下滚动条
+const tableWrap = ref<HTMLElement | null>(null);
+const {height: tableHeight} = useFillHeight(tableWrap);
+
 const handleSearch = () => {
   query.pageIndex = 1;
   getUserData();
@@ -450,7 +554,12 @@ let id: number = 0;
 let form = reactive(new User());
 
 const saveAdd = () => {
-  form.organizationId = selectedNode.value.id;
+  const node = currentOrgNode();
+  if (!node) {
+    ElMessage.warning('请先选择组织节点');
+    return;
+  }
+  form.organizationId = node.id;
   createUser(form).then(res => {
     getUserData();
     ElMessage.success(`新增成功`);
@@ -466,7 +575,12 @@ const handleEdit = (index: number, row: any) => {
 };
 const saveEdit = () => {
   editVisible.value = false;
-  form.organizationId = selectedNode.value.id;
+  const node = currentOrgNode();
+  if (!node) {
+    ElMessage.warning('请先选择组织节点');
+    return;
+  }
+  form.organizationId = node.id;
   console.log(form);
   updateUser(id, form).then(res => {
     getUserData();
@@ -485,6 +599,40 @@ const handleEnable = (row: any) => {
     ElMessage.success(`启用成功`);
   });
 }
+const handleResetPassword = (row: any) => {
+  resetPassword(row.id).then(() => {
+    ElMessage.success(`密码已重置为 123456`);
+  });
+}
+// 操作列下拉菜单
+const handleCommand = (cmd: string, row: any, index: number) => {
+  switch (cmd) {
+    case 'disable':
+      ElMessageBox.confirm('确定要禁用该用户吗？', '提示', {type: 'warning'})
+        .then(() => handleDisable(row))
+        .catch(() => {
+        });
+      break;
+    case 'enable':
+      ElMessageBox.confirm('确定要启用该用户吗？', '提示', {type: 'warning'})
+        .then(() => handleEnable(row))
+        .catch(() => {
+        });
+      break;
+    case 'edit':
+      handleEdit(index, row);
+      break;
+    case 'resetPassword':
+      ElMessageBox.confirm('确定将密码重置为 123456 吗？', '提示', {type: 'warning'})
+        .then(() => handleResetPassword(row))
+        .catch(() => {
+        });
+      break;
+    case 'delete':
+      handleDelete(row);
+      break;
+  }
+}
 const onAvatarSelect = (imgUrl: string) => {
   form.avatar = imgUrl;
 }
@@ -492,8 +640,66 @@ const onAvatarSelect = (imgUrl: string) => {
 </script>
 
 <style scoped>
+/* 两栏固定布局：左侧组织架构窄栏，右侧用户列表占满剩余高度 */
+.user-page { height: 100%; }
+.user-layout {
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: stretch;
+}
+.org-col {
+  flex: 0 0 200px;
+  width: 200px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #dcdfe6;
+}
+.org-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+/* 节点名过长时省略，避免把面板撑宽 */
+.custom-tree-node {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+.custom-tree-node > span:not(.el-dropdown) {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.custom-tree-node :deep(.el-dropdown) { flex: none; }
+.user-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding-left: 10px;
+  display: flex;
+  flex-direction: column;
+}
+.table-wrap { flex: 1 1 auto; min-height: 0; }
+.pagination { flex: none; }
+
 .handle-box {
+  flex: none;
   margin-bottom: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.handle-box > * {
+  margin: 0;
 }
 
 .handle-select {
@@ -522,5 +728,91 @@ const onAvatarSelect = (imgUrl: string) => {
   margin: auto;
   width: 40px;
   height: 40px;
+}
+
+/* ===== 窄屏卡片式用户列表 ===== */
+.user-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.user-card {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+}
+
+.uc-head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.uc-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  flex: none;
+  background: #f5f7fa;
+}
+
+.uc-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.uc-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.uc-sub {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.7;
+  word-break: break-all;
+}
+
+.uc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #ebeef5;
+}
+
+.uc-actions :deep(.el-button) {
+  padding: 4px 6px;
+  margin-left: 0;
+}
+
+@media (max-width: 768px) {
+  .user-page { height: auto; }
+  .user-layout { height: auto; display: block; }
+  .org-col {
+    width: auto;
+    flex: none;
+    border-right: none;
+  }
+  .org-panel {
+    max-height: 220px;
+    overflow-y: auto;
+    margin-bottom: 12px;
+    padding-right: 0 !important;
+  }
+  .user-col { padding-left: 0; display: block; }
+
+  .handle-input,
+  .handle-select {
+    width: 100%;
+  }
 }
 </style>

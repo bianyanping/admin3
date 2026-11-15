@@ -72,6 +72,8 @@
 import {reactive, ref} from 'vue';
 import VueCropper from 'vue-cropperjs';
 import 'cropperjs/dist/cropper.css';
+import {ElMessage} from "element-plus";
+import {changePassword} from "../api/user";
 import {useBasicStore} from "../store/basic";
 
 const form = reactive({
@@ -80,6 +82,18 @@ const form = reactive({
   desc: '不可能！我的代码怎么可能会有bug！'
 });
 const onSubmit = () => {
+  if (!form.old || !form.new) {
+    ElMessage.warning('请输入旧密码和新密码');
+    return;
+  }
+  changePassword(form.old, form.new).then(() => {
+    ElMessage.success('密码修改成功，请重新登录');
+    form.old = '';
+    form.new = '';
+    // 清空会话并跳转到登录页
+    localStorage.clear();
+    location.hash = '#/login';
+  });
 };
 const basicStore = useBasicStore();
 const userinfo = basicStore.userinfo;

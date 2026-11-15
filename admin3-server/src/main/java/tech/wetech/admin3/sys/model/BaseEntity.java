@@ -53,23 +53,11 @@ public abstract class BaseEntity {
       return false;
     }
     final BaseEntity that = (BaseEntity) object;
-    _checkIdentity(this);
-    _checkIdentity(that);
-    return this.id.equals(that.getId());
-  }
-
-  /**
-   * Checks the passed entity, if it has an identity. It gets an identity only by
-   * saving.
-   *
-   * @param entity the entity to be checked
-   * @throws IllegalStateException the passed entity does not have the identity
-   *                               attribute set.
-   */
-  private void _checkIdentity(final BaseEntity entity) {
-    if (entity.getId() == null) {
-      throw new IllegalStateException("Comparison identity missing in entity: " + entity);
+    // 未入库实体没有身份标识，按对象引用比较，避免关联集合操作时抛异常
+    if (this.id == null || that.id == null) {
+      return this == that;
     }
+    return this.id.equals(that.getId());
   }
 
   @Override

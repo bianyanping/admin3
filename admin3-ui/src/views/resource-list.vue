@@ -87,7 +87,7 @@
     </el-dialog>
 
     <!-- 编辑弹出框 -->
-    <el-dialog title="编辑" v-model="editVisible" width="40%">
+    <el-dialog title="编辑" v-model="editVisible" width="min(600px, 92vw)">
       <el-form label-width="70px">
         <el-form label-width="70px">
           <el-form-item label="上级节点">

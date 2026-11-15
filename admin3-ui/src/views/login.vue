@@ -1,7 +1,7 @@
 <template>
   <div class="login-wrap">
     <div class="ms-login">
-      <div class="ms-title">Admin3后台管理系统</div>
+      <div class="ms-title">账单流水分析系统</div>
       <el-form :model="param" :rules="rules" ref="login" label-width="0px" class="ms-content">
         <el-form-item prop="username">
           <el-input v-model="param.username" placeholder="username">
@@ -92,7 +92,8 @@ tags.clearTags();
   width: 100%;
   height: 100%;
   background-image: url(../assets/img/login-bg.jpg);
-  background-size: 100%;
+  background-size: cover;
+  background-position: center;
 }
 
 .ms-title {
@@ -109,7 +110,7 @@ tags.clearTags();
   left: 50%;
   top: 50%;
   width: 350px;
-  margin: -190px 0 0 -175px;
+  transform: translate(-50%, -50%);
   border-radius: 5px;
   background: rgba(255, 255, 255, 0.3);
   overflow: hidden;
@@ -133,5 +134,19 @@ tags.clearTags();
   font-size: 12px;
   line-height: 30px;
   color: #fff;
+}
+
+@media (max-width: 768px) {
+  .ms-login {
+    width: 88vw;
+  }
+
+  .ms-title {
+    font-size: 18px;
+  }
+
+  .ms-content {
+    padding: 20px 18px;
+  }
 }
 </style>

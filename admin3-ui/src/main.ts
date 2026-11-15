@@ -20,7 +20,9 @@ app.directive('action', {
     mounted(el, binding) {
         const permissions: string[] = basicStore?.userinfo?.permissions || [];
         const actionName: string = binding.arg || '';
-        if (permissions && !permissions.includes(actionName)) {
+        // 超级管理员（通配权限 *）不受权限配置限制
+        const isSuperAdmin = permissions.includes('*');
+        if (!isSuperAdmin && permissions && !permissions.includes(actionName)) {
             el['hidden'] = true;
         }
     },

@@ -189,6 +189,9 @@ public class StorageServiceImpl implements StorageService {
     StorageFile file = storageFileRepository.getByKey(key);
     Storage storage = getStorage(file.getStorageId());
     InputStream is = storage.getFileContent(key);
+    if (is == null) {
+      throw new StorageException(FAIL, "文件不存在或已被删除，请检查存储配置");
+    }
     return new InputStreamResource(is);
   }
 

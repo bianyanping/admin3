@@ -175,6 +175,15 @@ INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_
 INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (28, null, '更新对象存储', null, 'storage:update', 1, null, 25);
 INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (29, null, '删除对象存储', null, 'storage:delete', 1, null, 25);
 INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (30, null, '设置默认存储', null, 'storage:markAsDefault', 1, null, 25);
+INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (31, 'Money', '银行流水', null, 'bankStatement', 0, '/bank-statements', 1);
+INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (32, null, '流水单列表', null, 'bankStatement:view', 0, '/bank-statements', 31);
+INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (33, null, '上传流水', null, 'bankStatement:upload', 1, null, 31);
+INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (34, null, '查看明细', null, 'bankStatement:transaction:view', 1, null, 31);
+INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (35, null, '下载原文件', null, 'bankStatement:download', 1, null, 31);
+INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (36, null, '导出明细', null, 'bankStatement:transaction:export', 1, null, 31);
+INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (37, null, '分享流水', null, 'bankStatement:share', 1, null, 31);
+INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (38, null, '流水单分析', null, 'bankStatement:analysis', 0, '/bank-statement-analysis', 31);
+
 
 
 INSERT INTO role_resource (role_id, resource_id) VALUES (1, 2);
@@ -206,6 +215,14 @@ INSERT INTO role_resource (role_id, resource_id) VALUES (1, 27);
 INSERT INTO role_resource (role_id, resource_id) VALUES (1, 28);
 INSERT INTO role_resource (role_id, resource_id) VALUES (1, 29);
 INSERT INTO role_resource (role_id, resource_id) VALUES (1, 30);
+INSERT INTO role_resource (role_id, resource_id) VALUES (1, 31);
+INSERT INTO role_resource (role_id, resource_id) VALUES (1, 32);
+INSERT INTO role_resource (role_id, resource_id) VALUES (1, 33);
+INSERT INTO role_resource (role_id, resource_id) VALUES (1, 34);
+INSERT INTO role_resource (role_id, resource_id) VALUES (1, 35);
+INSERT INTO role_resource (role_id, resource_id) VALUES (1, 36);
+INSERT INTO role_resource (role_id, resource_id) VALUES (1, 37);
+INSERT INTO role_resource (role_id, resource_id) VALUES (1, 38);
 INSERT INTO role_resource (role_id, resource_id) VALUES (2, 2);
 INSERT INTO role_resource (role_id, resource_id) VALUES (2, 3);
 INSERT INTO role_resource (role_id, resource_id) VALUES (2, 6);

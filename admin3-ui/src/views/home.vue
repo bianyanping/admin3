@@ -1,6 +1,11 @@
 <template>
 	<v-header />
 	<v-sidebar />
+	<div
+		class="sidebar-mask"
+		v-if="sidebar.isMobile && !sidebar.collapse"
+		@click="sidebar.handleCollapse()"
+	></div>
 	<div class="content-box" :class="{ 'content-collapse': sidebar.collapse }">
 		<v-tags></v-tags>
 		<div class="content">

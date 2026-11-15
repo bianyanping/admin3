@@ -1,0 +1,321 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  padding-bottom: $spacing-xl;
+  background: $gradient-page;
+}
+
+/* ===== 顶部渐变头 ===== */
+.header {
+  padding: $spacing-lg $page-padding $spacing-xl;
+  background: $gradient-header;
+  border-bottom-left-radius: $radius-xl;
+  border-bottom-right-radius: $radius-xl;
+}
+
+.headerTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.hello {
+  display: block;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-semibold;
+  color: $color-text-white;
+}
+
+.subtitle {
+  display: block;
+  margin-top: 6rpx;
+  font-size: $font-size-sm;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.rangeGroup {
+  display: flex;
+  padding: 4rpx;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: $radius-round;
+}
+
+.rangeItem {
+  padding: 8rpx 18rpx;
+  border-radius: $radius-round;
+  transition: all $transition-fast;
+}
+
+.rangeItemActive {
+  background: $color-text-white;
+}
+
+.rangeText {
+  font-size: $font-size-xs;
+  color: $color-text-white;
+}
+
+.rangeItemActive .rangeText {
+  color: $color-primary;
+  font-weight: $font-weight-medium;
+}
+
+/* ===== 内容区 ===== */
+.body {
+  padding: 0 $page-padding;
+  margin-top: -48rpx;
+}
+
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: $spacing-md;
+}
+
+.summaryCard {
+  display: flex;
+  align-items: center;
+  margin-top: $spacing-md;
+  padding: $spacing-lg;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  box-shadow: $shadow-card;
+}
+
+.summaryItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.summaryLine {
+  width: 1rpx;
+  height: 64rpx;
+  background: $color-divider;
+}
+
+.summaryLabel {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.summaryIncome {
+  margin-top: 6rpx;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-income;
+}
+
+.summaryExpense {
+  margin-top: 6rpx;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-expense;
+}
+
+/* ===== 通用卡片 ===== */
+.card {
+  margin-top: $spacing-md;
+  padding: $spacing-lg;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  box-shadow: $shadow-card;
+}
+
+.cardHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: $spacing-md;
+}
+
+.cardTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.cardSub {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+/* ===== 趋势柱状图 ===== */
+.chartScroll {
+  width: 100%;
+  @include scroll-x-container;
+}
+
+.chartRow {
+  display: inline-flex;
+  align-items: flex-end;
+  padding-bottom: $spacing-sm;
+}
+
+.chartColumn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  width: 72rpx;
+}
+
+.bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 6rpx;
+  height: 130rpx;
+}
+
+.barIncome {
+  width: 16rpx;
+  min-height: 4rpx;
+  background: linear-gradient(180deg, #4cd263 0%, $color-income 100%);
+  border-radius: 4rpx 4rpx 0 0;
+}
+
+.barExpense {
+  width: 16rpx;
+  min-height: 4rpx;
+  background: linear-gradient(180deg, #ff7875 0%, $color-expense 100%);
+  border-radius: 4rpx 4rpx 0 0;
+}
+
+.chartLabel {
+  margin-top: $spacing-xs;
+  font-size: 20rpx;
+  color: $color-text-tertiary;
+  white-space: nowrap;
+}
+
+.legend {
+  display: flex;
+  justify-content: center;
+  gap: $spacing-lg;
+  margin-top: $spacing-xs;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+}
+
+.dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: $radius-round;
+  margin-right: 8rpx;
+}
+
+.dotIncome {
+  background: $color-income;
+}
+
+.dotExpense {
+  background: $color-expense;
+}
+
+.legendText {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+/* ===== 构成占比 ===== */
+.categoryItem {
+  margin-bottom: $spacing-md;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.categoryLine {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: $spacing-xs;
+}
+
+.categoryName {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.categoryPercent {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.progressTrack {
+  height: 12rpx;
+  background: $color-bg-hover;
+  border-radius: $radius-round;
+  overflow: hidden;
+}
+
+.progressBar {
+  height: 100%;
+  background: linear-gradient(90deg, $color-primary-light 0%, $color-primary 100%);
+  border-radius: $radius-round;
+}
+
+/* ===== 大额流水 ===== */
+.largeItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid $color-divider;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+.largeLeft {
+  flex: 1;
+  min-width: 0;
+  padding-right: $spacing-md;
+}
+
+.largeName {
+  display: block;
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.largeMeta {
+  display: block;
+  margin-top: 6rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  @include text-ellipsis;
+}
+
+.largeIncome {
+  flex: none;
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-income;
+}
+
+.largeExpense {
+  flex: none;
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-expense;
+}
+
+.loading {
+  display: block;
+  margin-top: $spacing-md;
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}

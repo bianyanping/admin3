@@ -27,22 +27,40 @@ a {
     right: 0;
     top: 70px;
     bottom: 0;
-    padding-bottom: 30px;
     -webkit-transition: left .3s ease-in-out;
     transition: left .3s ease-in-out;
     background: #f0f0f0;
+    display: flex;
+    flex-direction: column;
 }
 
 .content {
     width: auto;
-    height: 100%;
+    flex: 1 1 0;
+    min-height: 0;
     padding: 10px;
-    overflow-y: scroll;
+    overflow-y: auto;
     box-sizing: border-box;
+}
+
+/* 标签栏固定 30px，不允许被下方内容挤压（否则内容一高，标签栏会被压成一条缝） */
+.content-box > .tags {
+    flex: none;
 }
 
 .content-collapse {
     left: 65px;
+}
+
+/* 移动端抽屉展开时的遮罩 */
+.sidebar-mask {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 2000;
 }
 
 .container {
@@ -135,3 +153,28 @@ a {
 [hidden]{
     display: none !important;
 }
+
+/* ===== 移动端 / 窄屏适配（断点与 header.vue 保持一致） ===== */
+@media (max-width: 768px) {
+    .content-box,
+    .content-collapse {
+        left: 0;
+    }
+
+    .content {
+        padding: 6px;
+    }
+
+    .container {
+        padding: 8px;
+    }
+
+    .pagination {
+        text-align: center;
+    }
+
+    .form-box {
+        width: 100%;
+    }
+}
+

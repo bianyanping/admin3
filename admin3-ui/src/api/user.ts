@@ -45,3 +45,20 @@ export function enableUser(userId: number) {
         method: 'post'
     });
 }
+
+// 管理员重置用户密码为默认密码 123456
+export function resetPassword(userId: number) {
+    return request({
+        url: `${BASE_URI}/users/${userId}:reset-password`,
+        method: 'post'
+    });
+}
+
+// 当前用户自助修改密码
+export function changePassword(oldPassword: string, newPassword: string) {
+    return request({
+        url: `${BASE_URI}/users/password`,
+        method: 'post',
+        data: {oldPassword, newPassword}
+    });
+}

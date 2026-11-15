@@ -1,4 +1,8 @@
 spring:
+  servlet:
+    multipart:
+      max-file-size: 30MB
+      max-request-size: 30MB
   jpa:
     generate-ddl: true
     defer-datasource-initialization: true
@@ -29,3 +33,8 @@ spring:
 server:
   servlet:
     context-path: /admin3
+wechat:
+  miniapp:
+    # 微信小程序 AppID；AppSecret 通过环境变量注入，不要写进代码库
+    appid: wx7ae4bc2cdb849451
+    secret: ${WECHAT_MINIAPP_SECRET:}

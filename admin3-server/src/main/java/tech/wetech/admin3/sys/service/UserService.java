@@ -12,6 +12,10 @@ import tech.wetech.admin3.sys.event.UserUpdated;
 import tech.wetech.admin3.sys.exception.UserException;
 import tech.wetech.admin3.sys.model.Organization;
 import tech.wetech.admin3.sys.model.User;
+import tech.wetech.admin3.sys.model.UserCredential;
+import tech.wetech.admin3.sys.repository.SessionRepository;
+import tech.wetech.admin3.sys.repository.StoredEventRepository;
+import tech.wetech.admin3.sys.repository.UserCredentialRepository;
 import tech.wetech.admin3.sys.repository.UserRepository;
 import tech.wetech.admin3.sys.service.dto.OrgUserDTO;
 import tech.wetech.admin3.sys.service.dto.PageDTO;
@@ -30,10 +34,22 @@ import static tech.wetech.admin3.common.CommonResultStatus.RECORD_NOT_EXIST;
 @Service
 public class UserService {
 
-  private final UserRepository userRepository;
+  /**
+   * 新建用户的默认密码
+   */
+  public static final String DEFAULT_PASSWORD = "123456";
 
-  public UserService(UserRepository userRepository) {
+  private final UserRepository userRepository;
+  private final UserCredentialRepository userCredentialRepository;
+  private final StoredEventRepository storedEventRepository;
+  private final SessionRepository sessionRepository;
+
+  public UserService(UserRepository userRepository, UserCredentialRepository userCredentialRepository,
+                     StoredEventRepository storedEventRepository, SessionRepository sessionRepository) {
     this.userRepository = userRepository;
+    this.userCredentialRepository = userCredentialRepository;
+    this.storedEventRepository = storedEventRepository;
+    this.sessionRepository = sessionRepository;
   }
 
   @Transactional
@@ -46,8 +62,26 @@ public class UserService {
     user.setCreatedTime(LocalDateTime.now());
     user.setOrganization(organization);
     user = userRepository.save(user);
+    // 创建默认密码凭证
+    saveCredential(user, DEFAULT_PASSWORD);
     DomainEventPublisher.instance().publish(new UserCreated(user));
     return user;
+  }
+
+  /**
+   * 保存用户密码凭证（MD5(username + password)）
+   */
+  private void saveCredential(User user, String password) {
+    try {
+      UserCredential credential = new UserCredential();
+      credential.setIdentifier(user.getUsername());
+      credential.setCredential(SecurityUtil.md5(user.getUsername(), password));
+      credential.setIdentityType(UserCredential.IdentityType.PASSWORD);
+      credential.setUser(user);
+      userCredentialRepository.save(credential);
+    } catch (Exception e) {
+      throw new UserException(CommonResultStatus.FAIL, "密码加密失败：" + e.getMessage());
+    }
   }
 
   public Set<User> findUserByIds(Set<Long> userIds) {
@@ -110,7 +144,56 @@ public class UserService {
   @Transactional
   public void delete(Long userId) {
     User user = findUserById(userId);
+    // 审计日志保留，仅解除与待删除用户的关联
+    storedEventRepository.detachUser(userId);
+    // 依次清理登录会话、登录凭证、角色关联，最后删除用户
+    sessionRepository.deleteByUserId(userId);
+    userCredentialRepository.deleteByUserId(userId);
+    userRepository.deleteUserRoles(userId);
     userRepository.delete(user);
     DomainEventPublisher.instance().publish(new UserDeleted(user));
+  }
+
+  /**
+   * 重置用户密码为默认密码 123456
+   */
+  @Transactional
+  public void resetPassword(Long userId) {
+    User user = findUserById(userId);
+    UserCredential credential = userCredentialRepository
+      .findCredential(user.getUsername(), UserCredential.IdentityType.PASSWORD)
+      .orElseGet(() -> {
+        UserCredential c = new UserCredential();
+        c.setIdentifier(user.getUsername());
+        c.setIdentityType(UserCredential.IdentityType.PASSWORD);
+        c.setUser(user);
+        return c;
+      });
+    try {
+      credential.setCredential(SecurityUtil.md5(user.getUsername(), DEFAULT_PASSWORD));
+      userCredentialRepository.save(credential);
+    } catch (Exception e) {
+      throw new UserException(CommonResultStatus.FAIL, "密码加密失败：" + e.getMessage());
+    }
+  }
+
+  /**
+   * 用户自助修改密码（需校验旧密码）
+   */
+  @Transactional
+  public void changePassword(Long userId, String oldPassword, String newPassword) {
+    User user = findUserById(userId);
+    UserCredential credential = userCredentialRepository
+      .findCredential(user.getUsername(), UserCredential.IdentityType.PASSWORD)
+      .orElseThrow(() -> new UserException(CommonResultStatus.RECORD_NOT_EXIST, "用户凭证不存在"));
+    if (!credential.doCredentialMatch(oldPassword)) {
+      throw new UserException(CommonResultStatus.PARAM_ERROR, "旧密码不正确");
+    }
+    try {
+      credential.setCredential(SecurityUtil.md5(user.getUsername(), newPassword));
+      userCredentialRepository.save(credential);
+    } catch (Exception e) {
+      throw new UserException(CommonResultStatus.FAIL, "密码加密失败：" + e.getMessage());
+    }
   }
 }

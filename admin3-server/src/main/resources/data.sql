@@ -183,6 +183,10 @@ INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_
 INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (36, null, '导出明细', null, 'bankStatement:transaction:export', 1, null, 31);
 INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (37, null, '分享流水', null, 'bankStatement:share', 1, null, 31);
 INSERT INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (38, null, '流水单分析', null, 'bankStatement:analysis', 0, '/bank-statement-analysis', 31);
+INSERT IGNORE INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (39, 'Coin', '网贷分析', null, 'lending:view', 0, '/lending-analysis', 1);
+INSERT IGNORE INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (40, 'Collection', '网贷关键词库', null, 'lending:manage', 0, '/lending-platforms', 1);
+INSERT IGNORE INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (41, null, '查看网贷统计', null, 'lending:view', 1, null, 39);
+INSERT IGNORE INTO resource (id, icon, name, parent_ids, permission, type, url, parent_id) VALUES (42, null, '维护网贷关键词', null, 'lending:manage', 1, null, 40);
 
 
 
@@ -223,6 +227,10 @@ INSERT INTO role_resource (role_id, resource_id) VALUES (1, 35);
 INSERT INTO role_resource (role_id, resource_id) VALUES (1, 36);
 INSERT INTO role_resource (role_id, resource_id) VALUES (1, 37);
 INSERT INTO role_resource (role_id, resource_id) VALUES (1, 38);
+INSERT IGNORE INTO role_resource (role_id, resource_id) VALUES (1, 39);
+INSERT IGNORE INTO role_resource (role_id, resource_id) VALUES (1, 40);
+INSERT IGNORE INTO role_resource (role_id, resource_id) VALUES (1, 41);
+INSERT IGNORE INTO role_resource (role_id, resource_id) VALUES (1, 42);
 INSERT INTO role_resource (role_id, resource_id) VALUES (2, 2);
 INSERT INTO role_resource (role_id, resource_id) VALUES (2, 3);
 INSERT INTO role_resource (role_id, resource_id) VALUES (2, 6);

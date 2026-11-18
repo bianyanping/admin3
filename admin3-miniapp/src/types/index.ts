@@ -67,6 +67,16 @@ export interface CounterpartyStat {
   amount: number;
 }
 
+/** 风险标签（手工/系统规则） */
+export interface RiskTagItem {
+  id: number;
+  code: string;
+  name: string;
+  color?: string;
+  subjectType: string;
+  source: 'MANUAL' | 'SYSTEM';
+}
+
 /** 首页看板数据 */
 export interface DashboardStats {
   totalCount: number;

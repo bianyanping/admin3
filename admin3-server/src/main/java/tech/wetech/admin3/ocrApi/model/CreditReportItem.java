@@ -46,7 +46,7 @@ public class CreditReportItem extends BaseEntity {
   /**
    * 报告内的序号（1-based）
    */
-  @Comment("报告内序号（1 起，对应 PDF 中 '1.' '2.'）")
+  @Comment("报告内序号（1 起，对应 PDF 中的序号 1、2…）")
   private Integer itemNo;
 
   // ====== 机构 / 银行名（四类条目通用）======

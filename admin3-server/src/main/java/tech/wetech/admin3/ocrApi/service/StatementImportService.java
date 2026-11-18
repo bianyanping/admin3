@@ -30,6 +30,7 @@ import tech.wetech.admin3.ocrApi.parser.GlBankNativePdfParser;
 import tech.wetech.admin3.ocrApi.parser.GxrcbNativePdfParser;
 import tech.wetech.admin3.ocrApi.parser.NativePdfStatementParser;
 import tech.wetech.admin3.ocrApi.parser.PsbcNativePdfParser;
+import tech.wetech.admin3.ocrApi.parser.WechatNativePdfParser;
 import tech.wetech.admin3.sys.repository.UserRepository;
 import tech.wetech.admin3.sys.service.StorageService;
 import tech.wetech.admin3.sys.service.dto.StorageFileDTO;
@@ -104,6 +105,9 @@ public class StatementImportService {
     BANK_KEYWORDS.put("中国建设银行", "CCB");
     BANK_KEYWORDS.put("建设银行", "CCB");
     BANK_KEYWORDS.put("建行", "CCB");
+    BANK_KEYWORDS.put("微信支付交易明细证明", "WECHAT");
+    BANK_KEYWORDS.put("微信支付", "WECHAT");
+    BANK_KEYWORDS.put("财付通", "WECHAT");
   }
 
   private final BankStatementService bankStatementService;
@@ -168,7 +172,7 @@ public class StatementImportService {
       }
       if (code == null) {
         throw new BusinessException(CommonResultStatus.FAIL,
-          "该 PDF 未包含银行名称，无法自动识别，请在上传时手动选择银行（ICBC/PSBC/GXRCB/ABCHX/GLGMCZYH）");
+          "该 PDF 未包含银行名称，无法自动识别，请在上传时手动选择银行（ICBC/PSBC/GXRCB/ABCHX/GLGMCZYH/WECHAT）");
       }
       dto = parseOcrPages(code, pages, fileName);
       mode = "OCR";
@@ -176,7 +180,7 @@ public class StatementImportService {
     } else {
       if (code == null) {
         throw new BusinessException(CommonResultStatus.FAIL,
-          "该 PDF 未包含银行名称，无法自动识别，请在上传时手动选择银行（ICBC/PSBC/GXRCB/ABCHX/GLGMCZYH）");
+          "该 PDF 未包含银行名称，无法自动识别，请在上传时手动选择银行（ICBC/PSBC/GXRCB/ABCHX/GLGMCZYH/WECHAT）");
       }
       dto = parseNativePdf(code, pdfBytes);
       mode = "NATIVE";
@@ -341,15 +345,28 @@ public class StatementImportService {
     if (summary != null) {
       BigDecimal income = BigDecimal.ZERO;
       BigDecimal expense = BigDecimal.ZERO;
+      int mappedNeutral = 0;
       for (TransactionDTO tx : list) {
         if (tx.getAmount() == null) {
           continue;
+        }
+        // 仍有未映射的「其他」时不参与收支合计（direction 已按业务口径映射的行正常计入）
+        if ("其他".equals(tx.getDirection())) {
+          continue;
+        }
+        if ("其他".equals(tx.getRawDirection())) {
+          mappedNeutral++;
         }
         if (tx.getAmount().signum() >= 0) {
           income = income.add(tx.getAmount());
         } else {
           expense = expense.add(tx.getAmount().abs());
         }
+      }
+      if (mappedNeutral > 0) {
+        // 微信证明的「其他」不计收支，这里按业务口径映射为入/出，故合计与证明自带口径存在差额，属预期
+        warnings.add("微信「其他」类 " + mappedNeutral
+          + " 笔已按业务口径映射为入/出，收支合计按业务口径统计，与微信证明「不计收支」合计存在差额，属预期");
       }
       BigDecimal incomeDiff = summary.getTotalIncome() == null
         ? null : income.subtract(summary.getTotalIncome());
@@ -475,6 +492,7 @@ public class StatementImportService {
         case "GXRCB" -> GxrcbNativePdfParser.parse(tmp);
         case "GLGMCZYH" -> NativePdfStatementParser.parse(tmp, "GLGMCZYH");
         case "GLYH" -> GlBankNativePdfParser.parse(tmp);
+        case "WECHAT" -> WechatNativePdfParser.parse(tmp);
         default -> throw new BusinessException(CommonResultStatus.FAIL,
           "暂不支持该银行的原生 PDF 解析：" + bankCode + "，可尝试 forceOcr=true");
       };

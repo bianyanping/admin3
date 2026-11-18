@@ -22,9 +22,15 @@
   @include text-ellipsis;
 }
 
-.holder {
-  display: block;
+.holderRow {
+  display: flex;
+  align-items: center;
   margin-top: $spacing-xs;
+}
+
+.holder {
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: $font-size-md;
   color: $color-text-secondary;
   @include text-ellipsis;

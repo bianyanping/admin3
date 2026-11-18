@@ -25,7 +25,12 @@
       <el-table :data="tableData" :height="tableHeight" border class="table" header-cell-class-name="table-header">
       <el-table-column prop="id" label="ID" width="60" align="center"></el-table-column>
       <el-table-column prop="bankName" label="银行" min-width="140"></el-table-column>
-      <el-table-column prop="accountHolder" label="户名" min-width="120"></el-table-column>
+      <el-table-column label="户名" min-width="150">
+        <template #default="{ row }">
+          <span>{{ row.accountHolder }}</span>
+          <RiskTags :tags="customerTags.tagsFor(row.accountHolder)" />
+        </template>
+      </el-table-column>
       <el-table-column prop="accountNo" label="账号" min-width="180"></el-table-column>
       <el-table-column label="账期" width="220">
         <template #default="{ row }">
@@ -92,7 +97,13 @@
           <span class="card-title">{{ row.bankName }}</span>
           <el-tag :type="row.orgName ? 'warning' : 'info'" size="small" disable-transitions>{{ row.orgName || '根节点' }}</el-tag>
         </div>
-        <div class="card-row"><span class="k">户名</span><span class="v">{{ row.accountHolder }}</span></div>
+        <div class="card-row">
+          <span class="k">户名</span>
+          <span class="v">
+            {{ row.accountHolder }}
+            <RiskTags :tags="customerTags.tagsFor(row.accountHolder)" />
+          </span>
+        </div>
         <div class="card-row"><span class="k">账号</span><span class="v">{{ row.accountNo }}</span></div>
         <div class="card-row"><span class="k">账期</span><span class="v">{{ row.startDate }} ~ {{ row.endDate }}</span></div>
         <div class="card-row">
@@ -234,6 +245,8 @@ import {
 } from '../api/bankStatement';
 import {useIsMobile} from '../composables/useIsMobile';
 import {useFillHeight} from '../composables/useFillHeight';
+import {useRiskTags} from '../composables/useRiskTags';
+import RiskTags from '../components/RiskTags.vue';
 
 const router = useRouter();
 const isMobile = useIsMobile();
@@ -249,6 +262,7 @@ const bankOptions = [
   {value: 'ABCHX', label: '中国农业银行'},
   {value: 'GLGMCZYH', label: '桂林国民村镇银行'},
   {value: 'GLYH', label: '桂林银行'},
+  {value: 'WECHAT', label: '微信支付'},
 ];
 
 const query = reactive({
@@ -261,6 +275,7 @@ const query = reactive({
 });
 const tableData = ref<any[]>([]);
 const pageTotal = ref(0);
+const customerTags = useRiskTags('CUSTOMER');
 
 const loadData = () => {
   listStatements({
@@ -274,6 +289,8 @@ const loadData = () => {
   }).then((res: any) => {
     tableData.value = res.data.content || [];
     pageTotal.value = res.data.totalElements || 0;
+    // 当前页户名批量取标签
+    customerTags.load(tableData.value.map((row: any) => row.accountHolder));
   });
 };
 

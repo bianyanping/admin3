@@ -54,6 +54,15 @@ export function resetPassword(userId: number) {
     });
 }
 
+// 当前用户自助修改个人简介
+export function updateIntro(intro: string) {
+    return request({
+        url: `${BASE_URI}/users/intro`,
+        method: 'put',
+        data: {intro}
+    });
+}
+
 // 当前用户自助修改密码
 export function changePassword(oldPassword: string, newPassword: string) {
     return request({

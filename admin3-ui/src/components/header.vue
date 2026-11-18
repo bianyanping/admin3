@@ -24,7 +24,7 @@
           <span class="btn-bell-badge" v-if="message"></span>
         </div>
         <!-- 用户头像 -->
-        <el-avatar class="user-avator" :size="30" :src="avatar"/>
+        <el-avatar class="user-avator" :size="30" :src="avatar || 'avatar.jpg'"/>
         <!-- 用户名下拉菜单 -->
         <el-dropdown class="user-name" trigger="click" @command="handleCommand">
 					<span class="el-dropdown-link">

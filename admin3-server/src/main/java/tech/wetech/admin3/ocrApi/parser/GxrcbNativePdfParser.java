@@ -7,13 +7,17 @@ import tech.wetech.admin3.DTO.StatementHeader;
 import tech.wetech.admin3.DTO.StatementSummary;
 import tech.wetech.admin3.DTO.TransactionDTO;
 import tech.wetech.admin3.ocrApi.layout.AmountNormalizer;
+import tech.wetech.admin3.ocrApi.layout.PdfColumnTableReader;
 
 import java.io.File;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -43,13 +47,31 @@ public final class GxrcbNativePdfParser {
   /** 日期 */
   private static final Pattern ANY_DATE = Pattern.compile("(\\d{4}-\\d{2}-\\d{2})");
 
-  private static final Pattern TX_LINE = Pattern.compile(
-    "^\\s*(\\d+)\\s+(\\d{4}-\\d{2}-\\d{2})\\s+([+\\-]{0,2}[\\d,.]+)\\s+([\\d,.]+)\\s+(.*)$");
   private static final Pattern INCOME_SUM = Pattern.compile("收入合计[：:]*\\s*([\\d,.]+)");
   private static final Pattern INCOME_COUNT = Pattern.compile("收入笔数[：:]*\\s*(\\d+)");
   private static final Pattern EXPENSE_SUM = Pattern.compile("支出合计[：:]*\\s*([\\d,.]+)");
   private static final Pattern EXPENSE_COUNT = Pattern.compile("支出笔数[：:]*\\s*(\\d+)");
   private static final Pattern APPLY_TIME = Pattern.compile("明细申请时间[：:]*\\s*(\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2})");
+
+  /** 账号/户名等列会折行，必须按坐标还原整行 */
+  private static final Map<String, String> COLUMNS = new LinkedHashMap<>();
+  static {
+    COLUMNS.put("序号", "seqNo");
+    COLUMNS.put("交易时间", "transTime");
+    COLUMNS.put("支出/收入金额", "amount");
+    COLUMNS.put("账户余额", "balance");
+    COLUMNS.put("对方账号", "counterpartyAccount");
+    COLUMNS.put("对方户名", "counterpartyName");
+    COLUMNS.put("交易渠道", "channel");
+    COLUMNS.put("用途", "purpose");
+    COLUMNS.put("摘要", "summary");
+    COLUMNS.put("摘要内容", "summaryContent");
+    COLUMNS.put("附言", "postscript");
+    COLUMNS.put("备注", "remark");
+  }
+  private static final Set<String> REQUIRED_COLUMNS = Set.of(
+    "transTime", "amount", "balance", "counterpartyAccount", "counterpartyName");
+  private static final Pattern ROW_DATE = Pattern.compile("\\d{4}-\\d{2}-\\d{2}");
 
   private GxrcbNativePdfParser() {}
 
@@ -68,32 +90,32 @@ public final class GxrcbNativePdfParser {
       stripper.setSortByPosition(true);
 
       int totalPages = doc.getNumberOfPages();
+      String firstPage = null;
+      String lastPage = null;
       for (int p = 1; p <= totalPages; p++) {
         stripper.setStartPage(p);
         stripper.setEndPage(p);
         String pageText = stripper.getText(doc);
         raw.append(pageText).append('\n');
+        if (p == 1) firstPage = pageText;
+        if (p == totalPages) lastPage = pageText;
+      }
 
-        boolean firstPage = (p == 1);
-        for (String line : pageText.split("\\r?\\n")) {
+      if (firstPage != null) {
+        for (String line : firstPage.split("\\r?\\n")) {
           String trimmed = line.trim();
-          if (trimmed.isEmpty()) continue;
-
-          if (firstPage) fillHeaderOnce(trimmed, header);
-
-          Matcher txm = TX_LINE.matcher(trimmed);
-          if (txm.find()) {
-            TransactionDTO tx = buildTransaction(txm);
-            transactions.add(tx);
-          }
+          if (!trimmed.isEmpty()) fillHeaderOnce(trimmed, header);
         }
       }
 
-      // 末页汇总
-      stripper.setStartPage(totalPages);
-      stripper.setEndPage(totalPages);
-      String lastPage = stripper.getText(doc);
-      collectSummary(lastPage, summary);
+      // 账号/户名/用途等列会折行，按坐标取完整单元格
+      for (PdfColumnTableReader.Row row : PdfColumnTableReader.read(
+        doc, COLUMNS, REQUIRED_COLUMNS, "transTime", ROW_DATE)) {
+        TransactionDTO tx = buildTransaction(row);
+        if (tx != null) transactions.add(tx);
+      }
+
+      if (lastPage != null) collectSummary(lastPage, summary);
     }
 
     // 兜底：末页没抽到汇总时，用明细反算
@@ -163,14 +185,32 @@ public final class GxrcbNativePdfParser {
     if (second != null && header.getEndDate() == null) header.setEndDate(second);
   }
 
-  private static TransactionDTO buildTransaction(Matcher txm) {
+  private static TransactionDTO buildTransaction(PdfColumnTableReader.Row row) {
+    Matcher dm = ROW_DATE.matcher(text(row, "transTime"));
+    if (!dm.find()) return null;
+    LocalDate date;
+    try {
+      date = LocalDate.parse(dm.group());
+    } catch (Exception e) {
+      return null;
+    }
+
     TransactionDTO tx = new TransactionDTO();
-    tx.setSeqNo(Integer.parseInt(txm.group(1)));
-    tx.setTransDate(LocalDate.parse(txm.group(2)));
+    tx.setSeqNo(intValue(text(row, "seqNo"), 0));
+    tx.setTransDate(date);
+    Matcher tm = Pattern.compile("(\\d{1,2}:\\d{2}:\\d{2})").matcher(text(row, "transTime"));
+    if (tm.find()) {
+      String time = tm.group(1);
+      tx.setTransTime(time.length() == 7 ? "0" + time : time);
+    }
+
     // 金额可能带一个负号（支出）或两个负号（"--100,000.00"，表示冲正）
-    String sign = txm.group(3).replaceAll("[^+\\-]", "");
-    String digits = txm.group(3).replaceAll("[^\\d.,]", "");
-    BigDecimal value = AmountNormalizer.normalize(digits).abs();
+    String amountText = text(row, "amount");
+    String sign = amountText.replaceAll("[^+\\-]", "");
+    String digits = amountText.replaceAll("[^\\d.,]", "");
+    BigDecimal value = amount(digits);
+    if (value == null) value = BigDecimal.ZERO;
+    value = value.abs();
     boolean reversal = sign.length() >= 2;
     BigDecimal amount;
     String direction;
@@ -186,45 +226,53 @@ public final class GxrcbNativePdfParser {
       direction = "入";
     }
     tx.setAmount(amount);
-    tx.setBalance(AmountNormalizer.normalize(txm.group(4)));
+    tx.setBalance(amount(row.get("balance")));
     tx.setDirection(direction);
     tx.setAmountSignExplicit(true);
 
-    // pdfbox 把对方账号/户名/渠道/用途/摘要/附言/备注粘成一个 rest 段
-    String rest = txm.group(5);
-    String[] tokens = rest.split("\\s+");
-    int idx = 0;
-
-    // 找对方账号：6+ 位纯数字，且不是交易时间
-    for (; idx < tokens.length; idx++) {
-      String tk = tokens[idx];
-      if (tk.matches("\\d{6,}") && !tk.matches("\\d{2}:\\d{2}:\\d{2}")) {
-        tx.setCounterpartyAccount(tk);
-        idx++;
-        break;
-      }
-    }
-
-    // 对方户名：到下一个数字字段为止（含中文/英文/有限公司）
-    StringBuilder name = new StringBuilder();
-    for (; idx < tokens.length; idx++) {
-      String tk = tokens[idx];
-      if (tk.matches("\\d{6,}") || tk.matches("\\d{2}:\\d{2}:\\d{2}")) break;
-      name.append(tk);
-    }
-    String nameStr = name.toString().trim();
-    tx.setCounterpartyName(nameStr.isEmpty() ? null : nameStr);
-
-    // 剩下所有 token 塞摘要
-    StringBuilder remaining = new StringBuilder();
-    for (; idx < tokens.length; idx++) {
-      if (remaining.length() > 0) remaining.append(' ');
-      remaining.append(tokens[idx]);
-    }
-    String restStr = remaining.toString().trim();
-    tx.setSummary(restStr.isEmpty() ? null : restStr);
-
+    tx.setCounterpartyAccount(account(row.get("counterpartyAccount")));
+    tx.setCounterpartyName(compact(row.get("counterpartyName")));
+    tx.setChannel(compact(row.get("channel")));
+    tx.setPurpose(compact(row.get("purpose")));
+    tx.setSummary(compact(row.get("summary")));
+    tx.setPostscript(compact(row.get("postscript")));
+    tx.setRemark(compact(row.get("remark")));
     return tx;
+  }
+
+  private static String text(PdfColumnTableReader.Row row, String field) {
+    String value = row.get(field);
+    return value == null ? "" : value;
+  }
+
+  private static int intValue(String text, int fallback) {
+    try {
+      return Integer.parseInt(text.replaceAll("[^0-9]", ""));
+    } catch (Exception e) {
+      return fallback;
+    }
+  }
+
+  private static BigDecimal amount(String text) {
+    String s = text == null ? "" : text.replaceAll("[^0-9.,\\-+]", "");
+    if (s.isEmpty() || s.equals("-") || s.equals("+") || s.equals(".")) return null;
+    try {
+      return AmountNormalizer.normalize(s);
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  private static String account(String text) {
+    if (text == null) return null;
+    String value = text.replaceAll("\\s+", "");
+    return value.matches("[0-9A-Za-z*]{6,}") ? value : null;
+  }
+
+  private static String compact(String text) {
+    if (text == null) return null;
+    String value = text.replaceAll("\\s+", "");
+    return value.isEmpty() ? null : value;
   }
 
   private static void collectSummary(String text, StatementSummary s) {

@@ -75,9 +75,9 @@
                 <template #default="scope">
                   <el-image
                     class="table-td-thumb"
-                    :src="scope.row.avatar"
+                    :src="scope.row.avatar || 'avatar.jpg'"
                     :z-index="10"
-                    :preview-src-list="[scope.row.avatar]"
+                    :preview-src-list="[scope.row.avatar || 'avatar.jpg']"
                     preview-teleported
                   >
                   </el-image>
@@ -138,8 +138,8 @@
                 <div class="uc-head">
                   <el-image
                     class="uc-avatar"
-                    :src="row.avatar"
-                    :preview-src-list="[row.avatar]"
+                    :src="row.avatar || 'avatar.jpg'"
+                    :preview-src-list="[row.avatar || 'avatar.jpg']"
                     preview-teleported
                     fit="cover"
                   ></el-image>

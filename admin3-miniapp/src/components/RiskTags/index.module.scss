@@ -1,0 +1,61 @@
+@use '@/styles/variables.scss' as *;
+
+.tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-left: 8rpx;
+  vertical-align: middle;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6rpx;
+  padding: 0 8rpx;
+  font-size: 20rpx;
+  line-height: 30rpx;
+  border: 1rpx solid transparent;
+  border-radius: 6rpx;
+  white-space: nowrap;
+}
+
+.tagDanger {
+  color: #f56c6c;
+  background: #fef0f0;
+  border-color: #fde2e2;
+}
+
+.tagWarning {
+  color: #e6a23c;
+  background: #fdf6ec;
+  border-color: #faecd8;
+}
+
+.tagSuccess {
+  color: #67c23a;
+  background: #f0f9eb;
+  border-color: #e1f3d8;
+}
+
+.tagPrimary {
+  color: #409eff;
+  background: #ecf5ff;
+  border-color: #d9ecff;
+}
+
+.tagInfo {
+  color: #909399;
+  background: #f4f4f5;
+  border-color: #e9e9eb;
+}
+
+.tagSystem {
+  border-style: dashed;
+}
+
+.source {
+  margin-left: 4rpx;
+  font-size: 18rpx;
+  opacity: 0.7;
+}

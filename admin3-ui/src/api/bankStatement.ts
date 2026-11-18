@@ -58,6 +58,81 @@ export function getHolderAnalysis(accountHolder: string) {
   });
 }
 
+// 往来对手分析：双向对手汇总（入账 + 出账），可按户名筛选
+export function getCounterparties(accountHolder?: string) {
+  return request({
+    url: `${BASE_URI}/bank-statements/counterparties`,
+    method: 'get',
+    params: {accountHolder: accountHolder || undefined},
+    timeout: 60000
+  });
+}
+
+// 单个对手的逐笔明细，支持客户 / 账户 / 时间范围筛选
+export function getCounterpartyDetail(params: Record<string, any>) {
+  return request({
+    url: `${BASE_URI}/bank-statements/counterparties/detail`,
+    method: 'get',
+    params,
+    timeout: 60000
+  });
+}
+
+// ==================== 关键词分组 ====================
+
+// 关键词分组列表
+export function listKeywordGroups() {
+  return request({
+    url: `${BASE_URI}/keyword-groups`,
+    method: 'get'
+  });
+}
+
+// 新增关键词分组
+export function createKeywordGroup(data: Record<string, any>) {
+  return request({
+    url: `${BASE_URI}/keyword-groups`,
+    method: 'post',
+    data
+  });
+}
+
+// 修改关键词分组
+export function updateKeywordGroup(id: number, data: Record<string, any>) {
+  return request({
+    url: `${BASE_URI}/keyword-groups/${id}`,
+    method: 'put',
+    data
+  });
+}
+
+// 启用/停用关键词分组
+export function setKeywordGroupEnabled(id: number, enabled: boolean) {
+  return request({
+    url: `${BASE_URI}/keyword-groups/${id}/enabled`,
+    method: 'put',
+    params: {enabled}
+  });
+}
+
+// 删除关键词分组
+export function deleteKeywordGroup(id: number) {
+  return request({
+    url: `${BASE_URI}/keyword-groups/${id}`,
+    method: 'delete'
+  });
+}
+
+// 关键词命中分析（可按户名筛选）
+export function getKeywordAnalysis(accountHolder?: string) {
+  return request({
+    url: `${BASE_URI}/keyword-groups/analysis`,
+    method: 'get',
+    params: {accountHolder: accountHolder || undefined},
+    timeout: 60000
+  });
+}
+
 // 手动新增流水单
 export function createStatement(data: Record<string, any>) {
   return request({
@@ -115,6 +190,79 @@ export function exportTransactions(id: number) {
     responseType: 'blob',
     timeout: 120000
   });
+}
+
+/**
+ * 交易对手风险警示：批量比对资方库与黑名单。
+ * scope=PAGE 只比对 items 当前页行；STATEMENT/HOLDER/ALL 额外返回整段汇总。
+ */
+export function getRiskAlerts(data: {
+  scope?: 'PAGE' | 'STATEMENT' | 'HOLDER' | 'ALL';
+  statementId?: number;
+  accountHolder?: string;
+  items?: Array<{
+    key: string;
+    name?: string;
+    account?: string;
+    date?: string;
+    direction?: string;
+    amount?: number;
+  }>;
+}) {
+  return request({
+    url: `${BASE_URI}/bank-statements/risk-alerts`,
+    method: 'post',
+    data,
+    timeout: 60000
+  });
+}
+
+export interface RiskAlertMark {
+  matchType: 'NAME_ACCOUNT' | 'NAME';
+  library: 'FUNDER' | 'BLACKLIST_CP' | 'BLACKLIST_CUSTOMER';
+  libraryLabel: string;
+  targetName: string;
+  nameMatched: boolean;
+  accountMatched: boolean;
+  hint: string;
+}
+
+export interface RiskAlertRow {
+  transactionId: number | null;
+  statementId: number | null;
+  transDate: string | null;
+  direction: string | null;
+  amount: number | null;
+  counterpartyName: string | null;
+  counterpartyAccount: string | null;
+  matchType: 'NAME_ACCOUNT' | 'NAME';
+  library: RiskAlertMark['library'];
+  libraryLabel: string;
+  targetName: string;
+  hint: string;
+}
+
+export interface RiskAlertGroup {
+  targetName: string;
+  library: RiskAlertMark['library'];
+  libraryLabel: string;
+  matchType: 'NAME_ACCOUNT' | 'NAME';
+  count: number;
+  totalAmount: number;
+  rowsTruncated: boolean;
+  rows: RiskAlertRow[];
+}
+
+export interface RiskAlertSummary {
+  totalCount: number;
+  targetCount: number;
+  totalAmount: number;
+  groups: RiskAlertGroup[];
+}
+
+export interface RiskAlertResult {
+  marks: Record<string, RiskAlertMark>;
+  summary: RiskAlertSummary | null;
 }
 
 /**

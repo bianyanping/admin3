@@ -7,6 +7,7 @@ interface UserStore {
         userId: number | null;
         username: string;
         avatar: string;
+        intro: string;
         credential: { identifier: string, identityType: IdentityType };
         permissions: [];
     }
@@ -23,6 +24,7 @@ export const useBasicStore = defineStore('basic', {
             userId: null,
             username: '',
             avatar: '',
+            intro: '',
             credential: {},
             permissions: []
         }

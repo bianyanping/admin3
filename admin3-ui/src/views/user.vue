@@ -16,7 +16,7 @@
 							</span>
             </div>
             <div class="info-name">{{ username }}</div>
-            <div class="info-desc">不可能！我的代码怎么可能会有bug！</div>
+            <div class="info-desc">{{ form.desc || defaultIntro }}</div>
           </div>
         </el-card>
       </el-col>
@@ -73,32 +73,48 @@ import {reactive, ref} from 'vue';
 import VueCropper from 'vue-cropperjs';
 import 'cropperjs/dist/cropper.css';
 import {ElMessage} from "element-plus";
-import {changePassword} from "../api/user";
+import {changePassword, updateIntro} from "../api/user";
 import {useBasicStore} from "../store/basic";
 
+// 未设置简介时的兜底文案（语池以服务端 InspirationalQuotes 为准，新用户由后端随机分配）
+const defaultIntro = '保持热爱，奔赴山海。';
 const form = reactive({
   old: '',
   new: '',
-  desc: '不可能！我的代码怎么可能会有bug！'
+  desc: ''
 });
-const onSubmit = () => {
-  if (!form.old || !form.new) {
-    ElMessage.warning('请输入旧密码和新密码');
-    return;
-  }
-  changePassword(form.old, form.new).then(() => {
-    ElMessage.success('密码修改成功，请重新登录');
-    form.old = '';
-    form.new = '';
-    // 清空会话并跳转到登录页
-    localStorage.clear();
-    location.hash = '#/login';
-  });
-};
 const basicStore = useBasicStore();
 const userinfo = basicStore.userinfo;
+form.desc = userinfo.intro || '';
+
+const onSubmit = async () => {
+  if (form.old || form.new) {
+    if (!form.old || !form.new) {
+      ElMessage.warning('修改密码需同时输入旧密码和新密码');
+      return;
+    }
+  }
+  try {
+    if (form.desc !== (userinfo.intro || '')) {
+      await updateIntro(form.desc);
+      userinfo.intro = form.desc;
+      ElMessage.success('个人简介已保存');
+    }
+    if (form.old && form.new) {
+      await changePassword(form.old, form.new);
+      ElMessage.success('密码修改成功，请重新登录');
+      form.old = '';
+      form.new = '';
+      // 清空会话并跳转到登录页
+      localStorage.clear();
+      location.hash = '#/login';
+    }
+  } catch (e) {
+    // 请求异常已由拦截器提示
+  }
+};
 const username = ref(userinfo.username);
-const avatarImg = ref(userinfo.avatar);
+const avatarImg = ref(userinfo.avatar || 'avatar.jpg');
 const imgSrc = ref('');
 const cropImg = ref('');
 const dialogVisible = ref(false);

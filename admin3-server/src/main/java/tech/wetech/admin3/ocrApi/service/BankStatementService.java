@@ -191,6 +191,10 @@ public class BankStatementService {
       if (amount == null) {
         continue;
       }
+      // 微信「其他」类不计收支
+      if ("其他".equals(tx.getDirection())) {
+        continue;
+      }
       if (amount.signum() >= 0) {
         income = income.add(amount);
         incomeCount++;
@@ -242,6 +246,7 @@ public class BankStatementService {
     entity.setAmount(tx.getAmount());
     entity.setBalance(tx.getBalance());
     entity.setDirection(tx.getDirection());
+    entity.setRawDirection(tx.getRawDirection());
     entity.setOcrDirection(tx.getOcrDirection());
     entity.setCounterpartyAccount(tx.getCounterpartyAccount());
     entity.setCounterpartyName(tx.getCounterpartyName());

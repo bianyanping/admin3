@@ -283,8 +283,15 @@
   padding-right: $spacing-md;
 }
 
+.largeNameRow {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
 .largeName {
-  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: $font-size-md;
   color: $color-text-primary;
   @include text-ellipsis;

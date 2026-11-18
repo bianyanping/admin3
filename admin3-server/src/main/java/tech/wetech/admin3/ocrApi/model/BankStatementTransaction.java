@@ -74,6 +74,13 @@ public class BankStatementTransaction extends BaseEntity {
   private String direction;
 
   /**
+   * 数据源原始方向（如微信证明的「其他」），direction 为按业务口径映射后的入/出
+   */
+  @Comment("数据源原始方向（如微信证明的「其他」）")
+  @Column(length = 8)
+  private String rawDirection;
+
+  /**
    * OCR 识别的借贷标志
    */
   @Comment("OCR 原始识别出的借贷标志（用于和 direction 比对校验）")

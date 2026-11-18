@@ -2,7 +2,10 @@
   <div class="page">
     <div class="summary-card" v-if="statement">
       <el-button :icon="ArrowLeft" @click="$router.back()" style="float: right;">返回</el-button>
-      <h3>{{ statement.bankName }} · {{ statement.accountHolder }}</h3>
+      <h3>
+        {{ statement.bankName }} · {{ statement.accountHolder }}
+        <RiskTags :tags="customerTags.tagsFor(statement.accountHolder)" />
+      </h3>
       <div class="summary-grid">
         <div><label>账号</label><span>{{ statement.accountNo }}</span></div>
         <div><label>币种</label><span>{{ statement.currency }}</span></div>
@@ -12,6 +15,8 @@
         <div><label class="expense">总支出</label><span class="expense">{{ statement.totalExpense }} ({{ statement.expenseCount }}笔)</span></div>
       </div>
     </div>
+
+    <RiskAlertPanel :summary="riskSummary" />
 
     <div class="handle-box">
       <el-select v-model="query.direction" placeholder="借贷方向" class="handle-select" clearable>
@@ -29,7 +34,7 @@
     </div>
 
     <div v-if="!isMobile" ref="tableWrap" class="table-wrap">
-      <el-table :data="tableData" :height="tableHeight" border class="table" header-cell-class-name="table-header">
+      <el-table :data="tableData" :height="tableHeight" border class="table" header-cell-class-name="table-header" :row-class-name="riskRowClass">
       <el-table-column prop="seqNo" label="序号" width="60" align="center"></el-table-column>
       <el-table-column prop="transDate" label="交易日期" width="110"></el-table-column>
       <el-table-column prop="transTime" label="交易时间" width="90"></el-table-column>
@@ -39,9 +44,38 @@
         </template>
       </el-table-column>
       <el-table-column prop="balance" label="余额" width="140" align="right"></el-table-column>
-      <el-table-column prop="direction" label="方向" width="70" align="center"></el-table-column>
+      <el-table-column label="方向" width="70" align="center">
+        <template #default="{ row }">
+          <span
+            :title="directionTitle(row)"
+            :class="{ 'direction-mapped': !!directionTitle(row) }"
+          >{{ row.direction || (row.amount < 0 ? '出' : '入') }}</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="counterpartyAccount" label="对方账号" min-width="150"></el-table-column>
-      <el-table-column prop="counterpartyName" label="对方户名" min-width="140"></el-table-column>
+      <el-table-column label="对方户名" min-width="160">
+        <template #default="{ row }">
+          <span>{{ row.counterpartyName }}</span>
+          <RiskTags :tags="counterpartyTags.tagsFor(row.counterpartyName)" />
+          <el-tooltip v-if="riskMarks[row.id]" placement="top">
+            <span class="risk-flag" :class="riskMarks[row.id].matchType === 'NAME_ACCOUNT' ? 'risk-flag--both' : 'risk-flag--name'">
+              {{ riskBadge(riskMarks[row.id]) }}
+            </span>
+            <template #content>
+              <div class="risk-tip">
+                <div class="risk-tip-title">{{ riskMarks[row.id].hint }}</div>
+                <div class="risk-tip-sub">命中库：{{ riskMarks[row.id].libraryLabel }}</div>
+                <div class="risk-tip-sub">
+                  对方名称：{{ riskMarks[row.id].targetName }}（{{ riskMarks[row.id].nameMatched ? '一致' : '不一致' }}）
+                </div>
+                <div class="risk-tip-sub">
+                  对方卡号：{{ riskMarks[row.id].accountMatched ? '与库中卡号一致' : '未匹配' }}
+                </div>
+              </div>
+            </template>
+          </el-tooltip>
+        </template>
+      </el-table-column>
       <el-table-column prop="channel" label="渠道" width="100"></el-table-column>
       <el-table-column prop="summary" label="摘要" min-width="140"></el-table-column>
       <el-table-column prop="remark" label="备注" min-width="160"></el-table-column>
@@ -50,16 +84,30 @@
 
     <!-- 移动端：卡片式明细 -->
     <div v-else class="card-list">
-      <div class="txn-card" v-for="(row, idx) in tableData" :key="row.id ?? idx">
+      <div class="txn-card" v-for="(row, idx) in tableData" :key="row.id ?? idx" :class="riskCardClass(row)">
         <div class="card-head">
           <span class="card-date">{{ row.transDate }} {{ row.transTime }}</span>
-          <el-tag :type="row.amount < 0 ? 'danger' : 'success'" size="small" disable-transitions>
+          <el-tag :type="row.amount < 0 ? 'danger' : 'success'" size="small" disable-transitions :title="directionTitle(row)">
             {{ row.direction || (row.amount < 0 ? '出' : '入') }}
           </el-tag>
         </div>
         <div class="card-amount" :class="row.amount < 0 ? 'expense' : 'income'">{{ row.amount }}</div>
+        <div v-if="riskMarks[row.id]" class="card-risk"
+             :class="riskMarks[row.id].matchType === 'NAME_ACCOUNT' ? 'card-risk--both' : 'card-risk--name'">
+          <b>{{ riskBadge(riskMarks[row.id]) }}</b> · {{ riskMarks[row.id].hint }}
+          <div class="risk-tip-sub">
+            命中库：{{ riskMarks[row.id].libraryLabel }} · 名称{{ riskMarks[row.id].nameMatched ? '一致' : '不一致' }} ·
+            卡号{{ riskMarks[row.id].accountMatched ? '一致' : '未匹配' }}
+          </div>
+        </div>
         <div class="card-row"><span class="k">余额</span><span class="v">{{ row.balance }}</span></div>
-        <div class="card-row" v-if="row.counterpartyName"><span class="k">对方</span><span class="v">{{ row.counterpartyName }}</span></div>
+        <div class="card-row" v-if="row.counterpartyName">
+          <span class="k">对方</span>
+          <span class="v">
+            {{ row.counterpartyName }}
+            <RiskTags :tags="counterpartyTags.tagsFor(row.counterpartyName)" />
+          </span>
+        </div>
         <div class="card-row" v-if="row.counterpartyAccount"><span class="k">账号</span><span class="v">{{ row.counterpartyAccount }}</span></div>
         <div class="card-row" v-if="row.summary"><span class="k">摘要</span><span class="v">{{ row.summary }}</span></div>
         <div class="card-row" v-if="row.remark"><span class="k">备注</span><span class="v">{{ row.remark }}</span></div>
@@ -79,13 +127,23 @@
 </template>
 
 <script setup lang="ts">
-import {onMounted, reactive, ref} from 'vue';
+import {onMounted, reactive, ref, watch} from 'vue';
 import {useRoute} from 'vue-router';
 import {ElMessage} from 'element-plus';
 import {ArrowLeft, Download, Search} from '@element-plus/icons-vue';
-import {exportTransactions, getStatement, listTransactions, saveBlob} from '../api/bankStatement';
+import {
+  exportTransactions,
+  getRiskAlerts,
+  getStatement,
+  listTransactions,
+  saveBlob,
+} from '../api/bankStatement';
+import type {RiskAlertMark, RiskAlertSummary} from '../api/bankStatement';
 import {useIsMobile} from '../composables/useIsMobile';
 import {useFillHeight} from '../composables/useFillHeight';
+import {useRiskTags} from '../composables/useRiskTags';
+import RiskTags from '../components/RiskTags.vue';
+import RiskAlertPanel from '../components/RiskAlertPanel.vue';
 
 const route = useRoute();
 const id = Number(route.params.id);
@@ -106,11 +164,38 @@ const query = reactive({
 });
 const tableData = ref<any[]>([]);
 const pageTotal = ref(0);
+// 户名/对手标签：按当前页出现的名称批量取回
+const customerTags = useRiskTags('CUSTOMER');
+const counterpartyTags = useRiskTags('COUNTERPARTY');
+// 风险警示：当前页行标记 + 整份流水单汇总
+const riskSummary = ref<RiskAlertSummary | null>(null);
+const riskMarks = ref<Record<string, RiskAlertMark>>({});
+
+/** 方向被业务口径映射过时，悬浮提示数据源原始方向 */
+const directionTitle = (row: { rawDirection?: string; direction?: string }) =>
+  row?.rawDirection && row.rawDirection !== row.direction
+    ? `原始方向：${row.rawDirection}`
+    : '';
 
 onMounted(() => {
+  if (typeof route.query.keyword === 'string') {
+    query.keyword = route.query.keyword;
+  }
   getStatement(id).then((res: any) => {
     statement.value = res.data;
+    customerTags.load([res.data?.accountHolder]);
   });
+  loadData();
+});
+
+// 已在本页时，顶部汇总里点「原流水」会带 keyword 跳同路由，需要重新加载
+watch(() => route.query.keyword, (val) => {
+  const next = typeof val === 'string' ? val : '';
+  if (next === query.keyword) {
+    return;
+  }
+  query.keyword = next;
+  query.pageIndex = 1;
   loadData();
 });
 
@@ -127,8 +212,52 @@ const loadData = () => {
   }).then((res: any) => {
     tableData.value = res.data.content || [];
     pageTotal.value = res.data.totalElements || 0;
+    counterpartyTags.load(tableData.value.map((row) => row.counterpartyName));
+    loadRiskAlerts();
   });
 };
+
+/** 风险比对：当前页行批量比对 + 整份流水单汇总，一次请求完成 */
+const loadRiskAlerts = () => {
+  riskMarks.value = {};
+  getRiskAlerts({
+    scope: 'STATEMENT',
+    statementId: id,
+    items: tableData.value.map((row) => ({
+      key: String(row.id),
+      name: row.counterpartyName || undefined,
+      account: row.counterpartyAccount || undefined,
+      date: row.transDate || undefined,
+      direction: row.direction || undefined,
+      amount: row.amount ?? undefined,
+    })),
+  }).then((res: any) => {
+    riskMarks.value = res.data?.marks || {};
+    riskSummary.value = res.data?.summary || null;
+  }).catch(() => {
+    riskMarks.value = {};
+    riskSummary.value = null;
+  });
+};
+
+const riskRowClass = ({row}: { row: any }) => {
+  const mark = riskMarks.value[row.id];
+  if (!mark) {
+    return '';
+  }
+  return mark.matchType === 'NAME_ACCOUNT' ? 'risk-row--both' : 'risk-row--name';
+};
+
+const riskCardClass = (row: any) => {
+  const mark = riskMarks.value[row.id];
+  if (!mark) {
+    return '';
+  }
+  return mark.matchType === 'NAME_ACCOUNT' ? 'txn-card--both' : 'txn-card--name';
+};
+
+const riskBadge = (mark: RiskAlertMark) =>
+  mark.library === 'FUNDER' ? '资方' : '黑名单';
 
 const handleSearch = () => {
   query.pageIndex = 1;
@@ -185,6 +314,84 @@ const handleExport = () => {
   .handle-select,
   .handle-input,
   .handle-input-small { width: 100%; }
+}
+
+.direction-mapped {
+  border-bottom: 1px dashed #c0c4cc;
+  cursor: help;
+}
+
+/* 风险警示：命中行底色（红=名称+卡号，黄=仅名称/仅卡号） */
+:deep(.el-table__body tr.risk-row--both > td.el-table__cell) {
+  background: #fef0f0;
+}
+:deep(.el-table__body tr.risk-row--both:hover > td.el-table__cell) {
+  background: #fde2e2;
+}
+:deep(.el-table__body tr.risk-row--name > td.el-table__cell) {
+  background: #fdf6ec;
+}
+:deep(.el-table__body tr.risk-row--name:hover > td.el-table__cell) {
+  background: #faecd8;
+}
+
+.risk-flag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  vertical-align: middle;
+  cursor: help;
+}
+.risk-flag--both {
+  color: #fff;
+  background: #f56c6c;
+  border-color: #f56c6c;
+}
+.risk-flag--name {
+  color: #e6a23c;
+  background: #fdf6ec;
+  border-color: #faecd8;
+}
+.risk-tip {
+  max-width: 320px;
+  line-height: 1.6;
+}
+.risk-tip-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.risk-tip-sub {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.txn-card--both {
+  border-color: #f56c6c;
+  box-shadow: inset 0 0 0 1px #f56c6c;
+}
+.txn-card--name {
+  border-color: #e6a23c;
+  box-shadow: inset 0 0 0 1px #e6a23c;
+}
+.card-risk {
+  margin: 4px 0 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.card-risk--both {
+  color: #f56c6c;
+  background: #fef0f0;
+}
+.card-risk--name {
+  color: #e6a23c;
+  background: #fdf6ec;
 }
 
 /* 移动端卡片式明细 */

@@ -6,6 +6,8 @@ import styles from './index.module.scss';
 import StatCard from '@/components/StatCard';
 import EmptyState from '@/components/EmptyState';
 import { getDashboard } from '@/services/api';
+import { useRiskTags } from '@/hooks/useRiskTags';
+import RiskTags from '@/components/RiskTags';
 import { useAuthStore } from '@/store/auth';
 import type { DashboardStats } from '@/types';
 import { formatDayLabel, formatMoney, formatShortMoney, formatSignedMoney } from '@/utils/format';
@@ -21,12 +23,14 @@ const HomePage: React.FC = () => {
   const [days, setDays] = useState(30);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(false);
+  const counterpartyTags = useRiskTags('COUNTERPARTY');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await getDashboard(days);
       setStats(data);
+      counterpartyTags.load((data.recentLarge || []).map((item) => item.counterpartyName));
       console.info('[Home] 看板数据加载完成', { days, totalCount: data.totalCount });
     } catch (err) {
       console.error('[Home] 看板数据加载失败', err);
@@ -207,7 +211,10 @@ const HomePage: React.FC = () => {
                 onClick={() => openStatement(item.statementId)}
               >
                 <View className={styles.largeLeft}>
-                  <Text className={styles.largeName}>{item.counterpartyName || '未知交易'}</Text>
+                  <View className={styles.largeNameRow}>
+                    <Text className={styles.largeName}>{item.counterpartyName || '未知交易'}</Text>
+                    <RiskTags tags={counterpartyTags.tagsFor(item.counterpartyName)} />
+                  </View>
                   <Text className={styles.largeMeta}>
                     {item.transDate} · {item.summary || '--'}
                   </Text>

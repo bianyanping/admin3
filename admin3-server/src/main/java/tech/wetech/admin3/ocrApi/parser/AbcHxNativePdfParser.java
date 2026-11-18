@@ -2,6 +2,7 @@ package tech.wetech.admin3.ocrApi.parser;
 
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.pdfbox.text.TextPosition;
 import tech.wetech.admin3.DTO.BankStatementDTO;
 import tech.wetech.admin3.DTO.StatementHeader;
 import tech.wetech.admin3.DTO.StatementSummary;
@@ -15,7 +16,11 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -65,6 +70,31 @@ public final class AbcHxNativePdfParser {
   private static final Pattern COUNT = Pattern.compile("(\\d+)笔");
   private static final Pattern BIG_AMOUNT = Pattern.compile("-?\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})?|-?\\d+(?:\\.\\d{2})?");
 
+  /** 表头列名 → 语义字段。用于按 x 坐标把跨行折行的单元格内容还原到正确列 */
+  private static final Map<String, String> COLUMN_LABELS = new LinkedHashMap<>();
+  static {
+    COLUMN_LABELS.put("交易时间", "time");
+    COLUMN_LABELS.put("收入金额", "income");
+    COLUMN_LABELS.put("支出金额", "expense");
+    COLUMN_LABELS.put("账户余额", "balance");
+    COLUMN_LABELS.put("对方账号", "counterpartyAccount");
+    COLUMN_LABELS.put("对方户名", "counterpartyName");
+    COLUMN_LABELS.put("对方开户行", "counterpartyBank");
+    COLUMN_LABELS.put("转账用途", "purpose");
+    COLUMN_LABELS.put("交易用途", "purpose");
+    COLUMN_LABELS.put("摘要", "summary");
+  }
+  /** 至少具备这些列才按坐标还原；否则退回逐行解析 */
+  private static final Set<String> REQUIRED_COLUMNS = Set.of(
+    "time", "income", "expense", "balance", "counterpartyAccount", "counterpartyName");
+  private static final Pattern PAGE_FOOTER = Pattern.compile("第\\s*\\d+\\s*页\\s*/\\s*共\\s*\\d+\\s*页|共\\s*\\d+\\s*页\\s*第\\s*\\d+\\s*页");
+  private static final Pattern DATE_CELL = Pattern.compile("\\d{4}-\\d{2}-(?:\\d{2})?");
+  private static final Pattern ROW_DATE = Pattern.compile("(\\d{4}-\\d{2}-\\d{2})(?=\\s|$)");
+  private static final Pattern ROW_TIME = Pattern.compile("(\\d{1,2}:\\d{2}:\\d{2})");
+  /** 末页合计区，不能被并进最后一笔交易 */
+  private static final Pattern SUMMARY_LABEL = Pattern.compile("总\\s*(收入|支出)\\s*(笔数|金额)|合计");
+  private static final Pattern BLANK = Pattern.compile("\\s+");
+
   private AbcHxNativePdfParser() {}
 
   public static BankStatementDTO parse(File pdfFile) throws IOException {
@@ -85,6 +115,7 @@ public final class AbcHxNativePdfParser {
 
       LocalDate pendingDate = null;
       int lastSeenDay = -1;  // 用于 TX_B：补推断月份
+      LocalDate[] lastTxDate = {null};  // 按列解析时跨页继承日期
 
       for (int p = 1; p <= doc.getNumberOfPages(); p++) {
         s.setStartPage(p); s.setEndPage(p);
@@ -92,6 +123,21 @@ public final class AbcHxNativePdfParser {
         raw.append(pageText).append('\n');
         if (p == 1) firstPage = pageText;
         if (p == doc.getNumberOfPages()) lastPage = pageText;
+
+        // 农行明细表的单元格会折行，PDFBox 按视觉行输出时会把同一单元格拆到多行，
+        // 直接按行取 token 会把「对方账号」「对方户名」截断/串列。
+        // 有表头时优先按坐标还原整行；识别不到表头才退回原来的逐行逻辑。
+        List<TransactionDTO> columnRows = parseByColumns(doc, p, lastTxDate);
+        if (columnRows != null) {
+          if (p == 1) {
+            for (String line : pageText.split("\\r?\\n")) {
+              String t = line.trim();
+              if (!t.isEmpty()) fillHeaderOnce(t, header);
+            }
+          }
+          transactions.addAll(columnRows);
+          continue;
+        }
 
         for (String line : pageText.split("\\r?\\n")) {
           String t = line.trim();
@@ -421,5 +467,219 @@ public final class AbcHxNativePdfParser {
     tx.setCounterpartyName(name.isEmpty() ? null : name);
     String summary = before.toString().trim();
     tx.setSummary(summary.isEmpty() ? null : summary);
+  }
+
+  /**
+   * 带坐标的文本块。PDFBox 按视觉行输出文本时，表格中折行的单元格会被拆到多条文本行，
+   * 只有拿到每块文本的 x/y 才能把它们重新归位到同一行的同一列。
+   */
+  private static final class TextChunk {
+    final String text;
+    final float x0;
+    final float x1;
+    final float y;
+
+    TextChunk(String text, float x0, float x1, float y) {
+      this.text = text;
+      this.x0 = x0;
+      this.x1 = x1;
+      this.y = y;
+    }
+  }
+
+  /** 一行明细：列键 → 该列内的文本块（可能来自多条视觉行） */
+  private static final class Row {
+    private final Map<String, List<TextChunk>> cells = new LinkedHashMap<>();
+
+    void put(String column, TextChunk chunk) {
+      cells.computeIfAbsent(column, k -> new ArrayList<>()).add(chunk);
+    }
+
+    String joined(String column) {
+      List<TextChunk> list = cells.get(column);
+      if (list == null || list.isEmpty()) return "";
+      list.sort(Comparator.comparingDouble((TextChunk c) -> c.y).thenComparingDouble(c -> c.x0));
+      StringBuilder sb = new StringBuilder();
+      for (TextChunk c : list) {
+        if (c.text.isEmpty()) continue;
+        if (sb.length() > 0
+          && isAsciiWordChar(sb.charAt(sb.length() - 1))
+          && isAsciiWordChar(c.text.charAt(0))) {
+          sb.append(' ');
+        }
+        sb.append(c.text);
+      }
+      return BLANK.matcher(sb).replaceAll(" ").trim();
+    }
+  }
+
+  private static boolean isAsciiWordChar(char c) {
+    return c < 128 && Character.isLetterOrDigit(c);
+  }
+
+  /**
+   * 抽取一页里所有文本块及其坐标。
+   */
+  private static List<TextChunk> collectChunks(PDDocument doc, int page) throws IOException {
+    List<TextChunk> chunks = new ArrayList<>();
+    PDFTextStripper stripper = new PDFTextStripper() {
+      @Override
+      protected void writeString(String text, List<TextPosition> positions) {
+        if (positions == null || positions.isEmpty()) return;
+        StringBuilder sb = new StringBuilder();
+        float x0 = Float.MAX_VALUE;
+        float x1 = -Float.MAX_VALUE;
+        float y = positions.get(0).getYDirAdj();
+        for (TextPosition tp : positions) {
+          if (tp.getUnicode() != null) sb.append(tp.getUnicode());
+          x0 = Math.min(x0, tp.getXDirAdj());
+          x1 = Math.max(x1, tp.getXDirAdj() + tp.getWidthDirAdj());
+        }
+        String value = sb.toString().trim();
+        if (!value.isEmpty()) chunks.add(new TextChunk(value, x0, x1, y));
+      }
+    };
+    stripper.setSortByPosition(true);
+    stripper.setStartPage(page);
+    stripper.setEndPage(page);
+    stripper.getText(doc);
+    return chunks;
+  }
+
+  /**
+   * 按表头列坐标还原整页明细。表头缺失时返回 null，调用方回退到逐行解析。
+   */
+  private static List<TransactionDTO> parseByColumns(PDDocument doc, int page,
+                                                     LocalDate[] lastTxDate) throws IOException {
+    List<TextChunk> chunks = collectChunks(doc, page);
+
+    Map<String, Float> centers = new LinkedHashMap<>();
+    float headerY = Float.MAX_VALUE;
+    for (TextChunk c : chunks) {
+      String column = COLUMN_LABELS.get(c.text);
+      if (column != null && c.y < 200) {
+        centers.putIfAbsent(column, (c.x0 + c.x1) / 2f);
+        headerY = Math.min(headerY, c.y);
+      }
+    }
+    if (!centers.keySet().containsAll(REQUIRED_COLUMNS)) return null;
+
+    List<Map.Entry<String, Float>> columns = new ArrayList<>(centers.entrySet());
+    columns.sort(Comparator.comparingDouble(Map.Entry::getValue));
+    float[] boundaries = new float[columns.size() - 1];
+    for (int i = 0; i < boundaries.length; i++) {
+      boundaries[i] = (columns.get(i).getValue() + columns.get(i + 1).getValue()) / 2f;
+    }
+
+    // 每行以「交易时间」列里的时刻确定行数；行边界取相邻日期行的中线。
+    // 日期列可能被拆成 "2026-02-" + 时刻前的 "04"，所以只用来定位行，不直接取完整日期。
+    float summaryTop = Float.MAX_VALUE;
+    for (TextChunk c : chunks) {
+      if (c.y > headerY + 2 && SUMMARY_LABEL.matcher(c.text).find()) {
+        summaryTop = Math.min(summaryTop, c.y);
+      }
+    }
+    // 合计区上方留一行余量（合计数字往往比标签高一行）
+    float dataBottom = summaryTop == Float.MAX_VALUE ? Float.MAX_VALUE : summaryTop - 12f;
+
+    List<TextChunk> timeAnchors = new ArrayList<>();
+    List<TextChunk> dateAnchors = new ArrayList<>();
+    for (TextChunk c : chunks) {
+      if (c.y <= headerY + 2 || c.y > dataBottom) continue;
+      if (PAGE_FOOTER.matcher(c.text).find()) continue;
+      if (!"time".equals(columnOf(c, columns, boundaries))) continue;
+      if (ROW_TIME.matcher(c.text).find()) timeAnchors.add(c);
+      if (DATE_CELL.matcher(c.text).matches()) dateAnchors.add(c);
+    }
+    if (timeAnchors.isEmpty() || dateAnchors.size() != timeAnchors.size()) return null;
+    dateAnchors.sort(Comparator.comparingDouble(c -> c.y));
+    float[] rowBounds = new float[dateAnchors.size() - 1];
+    for (int i = 0; i < rowBounds.length; i++) {
+      rowBounds[i] = (dateAnchors.get(i).y + dateAnchors.get(i + 1).y) / 2f;
+    }
+
+    List<Row> rows = new ArrayList<>();
+    for (int i = 0; i < dateAnchors.size(); i++) rows.add(new Row());
+
+    for (TextChunk c : chunks) {
+      if (c.y <= headerY + 2 || c.y > dataBottom) continue;
+      if (PAGE_FOOTER.matcher(c.text).find()) continue;
+      if (COLUMN_LABELS.containsKey(c.text)) continue;
+      rows.get(rowIndex(rowBounds, c.y)).put(columnOf(c, columns, boundaries), c);
+    }
+
+    List<TransactionDTO> result = new ArrayList<>();
+    LocalDate lastDate = lastTxDate[0];
+    for (Row row : rows) {
+      String timeCell = row.joined("time");
+      Matcher dm = ROW_DATE.matcher(timeCell);
+      LocalDate date = null;
+      if (dm.find()) {
+        try { date = LocalDate.parse(dm.group(1)); } catch (Exception ignored) {}
+      }
+      if (date == null) date = lastDate;
+      if (date == null) continue;
+      lastDate = date;
+
+      BigDecimal income = amount(row.joined("income"));
+      BigDecimal expense = amount(row.joined("expense"));
+      BigDecimal amount;
+      if (income != null) amount = income;
+      else if (expense != null) amount = expense.negate();
+      else amount = BigDecimal.ZERO;
+
+      TransactionDTO tx = new TransactionDTO();
+      tx.setTransDate(date);
+      Matcher tm = ROW_TIME.matcher(timeCell);
+      if (tm.find()) {
+        String timeStr = tm.group(1);
+        if (timeStr.length() == 7) timeStr = "0" + timeStr;
+        tx.setTransTime(timeStr);
+        try { tx.setTransDateTime(LocalDateTime.of(date, LocalTime.parse(timeStr))); }
+        catch (Exception ignored) {}
+      }
+      tx.setAmount(amount);
+      tx.setBalance(amount(row.joined("balance")));
+      tx.setDirection(amount.signum() >= 0 ? "入" : "出");
+      tx.setAmountSignExplicit(false);
+
+      // 对方账号可能被折成多段（如 6600000190 + 69700012），也可能含字母，直接拼接
+      String account = row.joined("counterpartyAccount").replaceAll("[^0-9A-Za-z]", "");
+      tx.setCounterpartyAccount(account.isEmpty() ? null : account);
+      String name = row.joined("counterpartyName");
+      tx.setCounterpartyName(name.isEmpty() ? null : name);
+      String summary = row.joined("summary");
+      tx.setSummary(summary.isEmpty() ? null : summary);
+      result.add(tx);
+    }
+    lastTxDate[0] = lastDate;
+    return result.isEmpty() ? null : result;
+  }
+
+  private static String columnOf(TextChunk chunk, List<Map.Entry<String, Float>> columns,
+                                 float[] boundaries) {
+    float center = (chunk.x0 + chunk.x1) / 2f;
+    for (int i = 0; i < boundaries.length; i++) {
+      if (center < boundaries[i]) return columns.get(i).getKey();
+    }
+    return columns.get(columns.size() - 1).getKey();
+  }
+
+  private static int rowIndex(float[] bounds, float y) {
+    for (int i = 0; i < bounds.length; i++) {
+      if (y < bounds[i]) return i;
+    }
+    return bounds.length;
+  }
+
+  private static BigDecimal amount(String value) {
+    if (value == null) return null;
+    String clean = value.replaceAll("[^0-9.,+-]", "");
+    if (clean.isEmpty() || clean.equals("+") || clean.equals("-")) return null;
+    try {
+      return AmountNormalizer.normalize(clean);
+    } catch (Exception e) {
+      return null;
+    }
   }
 }

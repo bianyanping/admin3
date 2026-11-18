@@ -6,6 +6,8 @@ import styles from './index.module.scss';
 import TransactionItem from '@/components/TransactionItem';
 import EmptyState from '@/components/EmptyState';
 import { getStatementDetail, getTransactions } from '@/services/api';
+import { useRiskTags } from '@/hooks/useRiskTags';
+import RiskTags from '@/components/RiskTags';
 import type { Statement, Transaction } from '@/types';
 import { formatMoney, maskAccount } from '@/utils/format';
 
@@ -35,6 +37,8 @@ const StatementDetailPage: React.FC = () => {
   const pageRef = useRef(1);
   const finishedRef = useRef(false);
   const loadingRef = useRef(false);
+  const customerTags = useRiskTags('CUSTOMER');
+  const counterpartyTags = useRiskTags('COUNTERPARTY');
 
   const fetchList = useCallback(
     async (nextPage: number, reset = false, override: FilterOverride = {}) => {
@@ -60,6 +64,7 @@ const StatementDetailPage: React.FC = () => {
         });
         setList((prev) => (reset ? result.list : [...prev, ...result.list]));
         setTotal(result.total);
+        counterpartyTags.load(result.list.map((item) => item.counterpartyName));
         pageRef.current = nextPage;
         finishedRef.current = result.list.length < PAGE_SIZE;
       } catch (err) {
@@ -79,7 +84,10 @@ const StatementDetailPage: React.FC = () => {
       return;
     }
     getStatementDetail(statementId)
-      .then((data) => setStatement(data))
+      .then((data) => {
+        setStatement(data);
+        customerTags.load([data.accountHolder]);
+      })
       .catch((err) => console.error('[StatementDetail] 汇总信息加载失败', err));
     fetchList(1, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -108,7 +116,10 @@ const StatementDetailPage: React.FC = () => {
     <View className={styles.page}>
       <View className={styles.summaryCard}>
         <Text className={styles.bank}>{statement?.bankName || '--'}</Text>
-        <Text className={styles.holder}>{statement?.accountHolder || '--'}</Text>
+        <View className={styles.holderRow}>
+          <Text className={styles.holder}>{statement?.accountHolder || '--'}</Text>
+          <RiskTags tags={customerTags.tagsFor(statement?.accountHolder)} />
+        </View>
         <Text className={styles.account}>{maskAccount(statement?.accountNo)}</Text>
         <View className={styles.periodRow}>
           <Text className={styles.period}>
@@ -172,7 +183,13 @@ const StatementDetailPage: React.FC = () => {
         {list.length === 0 && !loading ? (
           <EmptyState text="没有符合条件的交易" />
         ) : (
-          list.map((item) => <TransactionItem key={item._id} transaction={item} />)
+          list.map((item) => (
+            <TransactionItem
+              key={item._id}
+              transaction={item}
+              tags={counterpartyTags.tagsFor(item.counterpartyName)}
+            />
+          ))
         )}
       </View>
 

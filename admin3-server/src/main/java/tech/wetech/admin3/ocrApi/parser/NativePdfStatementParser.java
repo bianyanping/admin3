@@ -6,13 +6,17 @@ import tech.wetech.admin3.DTO.BankStatementDTO;
 import tech.wetech.admin3.DTO.StatementHeader;
 import tech.wetech.admin3.DTO.StatementSummary;
 import tech.wetech.admin3.DTO.TransactionDTO;
+import tech.wetech.admin3.ocrApi.layout.PdfColumnTableReader;
 
 import java.io.File;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -38,8 +42,23 @@ public final class NativePdfStatementParser {
   private static final Pattern ACCOUNT = Pattern.compile("账号[：:]*\\s*(\\d{6,})");
   private static final Pattern HOLDER = Pattern.compile("户名[：:]*\\s*(\\S+)");
   private static final Pattern CURRENCY = Pattern.compile("币种[：:]*\\s*(\\S+)");
-  private static final Pattern TX_DATE = Pattern.compile("^(\\d{4}-\\d{2}-\\d{2})\\s");
   private static final Pattern AMOUNT_STRICT = Pattern.compile("^\\d+\\.\\d{2}$");
+
+  /** 对方账户/对方户名会折行，按坐标还原 */
+  private static final Map<String, String> COLUMNS = new LinkedHashMap<>();
+  static {
+    COLUMNS.put("交易时间", "transTime");
+    COLUMNS.put("收入", "income");
+    COLUMNS.put("支出", "expense");
+    COLUMNS.put("余额", "balance");
+    COLUMNS.put("对方账户", "counterpartyAccount");
+    COLUMNS.put("对方户名", "counterpartyName");
+    COLUMNS.put("摘要", "summary");
+    COLUMNS.put("流水号", "serial");
+  }
+  private static final Set<String> REQUIRED_COLUMNS = Set.of(
+    "transTime", "income", "expense", "balance", "counterpartyAccount", "counterpartyName");
+  private static final Pattern ROW_DATE = Pattern.compile("\\d{4}-\\d{2}-\\d{2}");
 
   private NativePdfStatementParser() {}
 
@@ -55,9 +74,6 @@ public final class NativePdfStatementParser {
     try (PDDocument doc = PDDocument.load(pdfFile)) {
       PDFTextStripper stripper = new PDFTextStripper();
       stripper.setSortByPosition(true);
-
-      BigDecimal prevBalance = null;
-      int seqNo = 0;
 
       for (int p = 1; p <= doc.getNumberOfPages(); p++) {
         stripper.setStartPage(p);
@@ -81,43 +97,46 @@ public final class NativePdfStatementParser {
           if (hm.find() && header.getAccountHolder() == null) header.setAccountHolder(amendHolder(hm.group(1)));
           Matcher cm = CURRENCY.matcher(trimmed);
           if (cm.find() && header.getCurrency() == null) header.setCurrency(cm.group(1));
-
-          // ===== 交易行 =====
-          Matcher txm = TX_DATE.matcher(trimmed);
-          if (!txm.find()) continue;
-
-          String[] tokens = trimmed.split("\\s+");
-          if (tokens.length < 5) continue;
-
-          BigDecimal firstAmount = tryAmount(tokens[1]);
-          BigDecimal balance = tryAmount(tokens[2]);
-          if (firstAmount == null || balance == null) continue;
-
-          // 方向：余额差反推（本行真实金额 = 本行余额 − 上行余额）
-          BigDecimal amount = firstAmount;
-          if (prevBalance != null) {
-            BigDecimal expected = prevBalance.add(amount);
-            if (expected.compareTo(balance) != 0) {
-              // 说明 pdfbox 把空列跳过后，剩下那列的金额方向与实际不一致
-              // 直接用余额差修正
-              amount = balance.subtract(prevBalance);
-            }
-          }
-          prevBalance = balance;
-
-          TransactionDTO tx = new TransactionDTO();
-          tx.setSeqNo(++seqNo);
-          tx.setTransDate(toDate(tokens[0]));
-          tx.setAmount(amount);
-          tx.setBalance(balance);
-          tx.setDirection(amount.signum() >= 0 ? "入" : "出");
-          tx.setAmountSignExplicit(false);
-          tx.setCounterpartyAccount(tokens[3]);
-          if (tokens.length > 4) tx.setCounterpartyName(tokens[4]);
-          if (tokens.length > 5) tx.setSummary(tokens[5]);
-          if (tokens.length > 6) tx.setRemark(tokens[6] == null ? null : "流水号:" + tokens[6]);
-          transactions.add(tx);
         }
+      }
+
+      // 对方账户/对方户名等列会折行，按坐标还原整行
+      BigDecimal prevBalance = null;
+      int seqNo = 0;
+      for (PdfColumnTableReader.Row row : PdfColumnTableReader.read(
+        doc, COLUMNS, REQUIRED_COLUMNS, "transTime", ROW_DATE)) {
+        String dateText = row.get("transTime");
+        if (dateText == null) continue;
+        Matcher dm = ROW_DATE.matcher(dateText);
+        if (!dm.find()) continue;
+        LocalDate date = toDate(dm.group());
+        if (date == null) continue;
+
+        BigDecimal income = tryAmount(row.get("income"));
+        BigDecimal expense = tryAmount(row.get("expense"));
+        BigDecimal balance = tryAmount(row.get("balance"));
+        if (balance == null) continue;
+
+        BigDecimal amount = income != null ? income : (expense == null ? BigDecimal.ZERO : expense.negate());
+        // 余额差校正，防止个别行金额列缺失
+        if (prevBalance != null && prevBalance.add(amount).compareTo(balance) != 0) {
+          amount = balance.subtract(prevBalance);
+        }
+        prevBalance = balance;
+
+        TransactionDTO tx = new TransactionDTO();
+        tx.setSeqNo(++seqNo);
+        tx.setTransDate(date);
+        tx.setAmount(amount);
+        tx.setBalance(balance);
+        tx.setDirection(amount.signum() >= 0 ? "入" : "出");
+        tx.setAmountSignExplicit(false);
+        tx.setCounterpartyAccount(compact(row.get("counterpartyAccount")));
+        tx.setCounterpartyName(compact(row.get("counterpartyName")));
+        tx.setSummary(compact(row.get("summary")));
+        String serial = compact(row.get("serial"));
+        if (serial != null) tx.setRemark("流水号:" + serial);
+        transactions.add(tx);
       }
     }
 
@@ -164,6 +183,12 @@ public final class NativePdfStatementParser {
   private static String amendHolder(String holder) {
     if (holder == null) return null;
     return holder.replaceFirst("币种.*$", "").trim();
+  }
+
+  private static String compact(String text) {
+    if (text == null) return null;
+    String value = text.replaceAll("\\s+", "");
+    return value.isEmpty() ? null : value;
   }
 
   private static LocalDate toDate(String s) {

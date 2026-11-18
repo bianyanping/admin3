@@ -6,6 +6,7 @@ import styles from './index.module.scss';
 import StatementCard from '@/components/StatementCard';
 import EmptyState from '@/components/EmptyState';
 import { getStatements } from '@/services/api';
+import { useRiskTags } from '@/hooks/useRiskTags';
 import type { Statement } from '@/types';
 
 const PAGE_SIZE = 10;
@@ -16,7 +17,8 @@ const BANK_FILTERS = [
   { label: '农业银行', value: 'ABCHX' },
   { label: '邮储银行', value: 'PSBC' },
   { label: '广西农商联合银行', value: 'GXRCB' },
-  { label: '桂林银行', value: 'GLYH' }
+  { label: '桂林银行', value: 'GLYH' },
+  { label: '微信支付', value: 'WECHAT' }
 ];
 
 interface FilterOverride {
@@ -33,6 +35,7 @@ const StatementsPage: React.FC = () => {
   const pageRef = useRef(1);
   const finishedRef = useRef(false);
   const loadingRef = useRef(false);
+  const customerTags = useRiskTags('CUSTOMER');
 
   const fetchList = useCallback(
     async (nextPage: number, reset = false, override: FilterOverride = {}) => {
@@ -57,6 +60,7 @@ const StatementsPage: React.FC = () => {
         });
         setList((prev) => (reset ? result.list : [...prev, ...result.list]));
         setTotal(result.total);
+        customerTags.load(result.list.map((item) => item.accountHolder));
         pageRef.current = nextPage;
         finishedRef.current = result.list.length < PAGE_SIZE;
       } catch (err) {
@@ -146,7 +150,12 @@ const StatementsPage: React.FC = () => {
 
       <View className={styles.list}>
         {list.map((item) => (
-          <StatementCard key={item._id} statement={item} onClick={openDetail} />
+          <StatementCard
+            key={item._id}
+            statement={item}
+            tags={customerTags.tagsFor(item.accountHolder)}
+            onClick={openDetail}
+          />
         ))}
       </View>
 

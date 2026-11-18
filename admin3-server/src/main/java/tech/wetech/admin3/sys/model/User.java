@@ -24,6 +24,12 @@ public class User extends BaseEntity {
   private String avatar;
 
   /**
+   * 个人简介，新建用户时从励志语池随机初始化，用户可自行修改
+   */
+  @Column(length = 255)
+  private String intro;
+
+  /**
    * 微信小程序 openid，绑定后小程序登录即以此身份继承所属组织的可见范围
    */
   @Column(length = 64, unique = true)
@@ -111,6 +117,14 @@ public class User extends BaseEntity {
 
   public void setAvatar(String avatar) {
     this.avatar = avatar;
+  }
+
+  public String getIntro() {
+    return intro;
+  }
+
+  public void setIntro(String intro) {
+    this.intro = intro;
   }
 
   public String getWxOpenid() {

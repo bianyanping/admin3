@@ -94,15 +94,29 @@ public class UserController {
     return ResponseEntity.ok().build();
   }
 
+  /**
+   * 当前登录用户自助修改个人简介
+   */
+  @PutMapping("/intro")
+  public ResponseEntity<Void> updateIntro(@RequestBody UpdateIntroRequest request) {
+    Long currentUserId = ((tech.wetech.admin3.sys.service.dto.UserinfoDTO)
+      tech.wetech.admin3.common.SessionItemHolder.getItem(tech.wetech.admin3.common.Constants.SESSION_CURRENT_USER)).userId();
+    userService.updateIntro(currentUserId, request.intro());
+    return ResponseEntity.ok().build();
+  }
+
   record ChangePasswordRequest(@NotBlank String oldPassword, @NotBlank String newPassword) {
   }
 
+  record UpdateIntroRequest(String intro) {
+  }
+
   record CreateUserRequest(@NotBlank String username, @NotNull User.Gender gender,
-                           @NotBlank String avatar, Long organizationId) {
+                           String avatar, Long organizationId) {
   }
 
   record UpdateUserRequest(@NotNull User.Gender gender,
-                           @NotBlank String avatar, Long organizationId) {
+                           String avatar, Long organizationId) {
   }
 
 }

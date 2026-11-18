@@ -18,8 +18,15 @@
   padding-right: $spacing-md;
 }
 
+.titleRow {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
 .title {
-  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: $font-size-md;
   font-weight: $font-weight-medium;
   color: $color-text-primary;

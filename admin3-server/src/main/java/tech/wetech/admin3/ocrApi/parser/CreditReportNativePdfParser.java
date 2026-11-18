@@ -488,12 +488,12 @@ public final class CreditReportNativePdfParser {
     m = Pattern.compile("为(.+?)[（(]证件类型").matcher(sentence);
     if (m.find()) item.setGuaranteeCompanyName(m.group(1).trim());
 
-    // 3. 企业证件类型
-    m = Pattern.compile("证件类型[：:]\\s*(\\S+)").matcher(sentence);
+    // 3. 企业证件类型（原文形如「（证件类型：中征码，证件号码：CN4503MAA7WPRY67）」，需在逗号/括号处截断）
+    m = Pattern.compile("证件类型[：:]\\s*([^\\s，,；;）)]+)").matcher(sentence);
     if (m.find()) item.setGuaranteeCompanyIdType(m.group(1));
 
     // 4. 企业证件号码
-    m = Pattern.compile("证件号码[：:]\\s*(\\S+)").matcher(sentence);
+    m = Pattern.compile("证件号码[：:]\\s*([^\\s，,；;）)]+)").matcher(sentence);
     if (m.find()) item.setGuaranteeCompanyIdNo(m.group(1));
 
     // 5. 银行名："在" 到 "办理的贷款"
@@ -501,7 +501,7 @@ public final class CreditReportNativePdfParser {
     if (m.find()) item.setOrgName(m.group(1).trim());
 
     // 6. 责任人类型（保证人）
-    m = Pattern.compile("责任人类型为(\\S+)").matcher(sentence);
+    m = Pattern.compile("责任人类型为([^\\s，,；;）)]+)").matcher(sentence);
     if (m.find()) item.setResponsibilityType(m.group(1));
 
     // 7. 相关还款责任金额
@@ -509,7 +509,7 @@ public final class CreditReportNativePdfParser {
     if (m.find()) item.setAmount(parseAmount(m.group(1)));
 
     // 8. 保证合同编号（可选）
-    m = Pattern.compile("保证合同编号[：:]\\s*(\\S+)").matcher(sentence);
+    m = Pattern.compile("保证合同编号[：:]\\s*([^\\s，,；;）)]+)").matcher(sentence);
     if (m.find()) item.setContractNo(m.group(1));
 
     // 9. 截至日期

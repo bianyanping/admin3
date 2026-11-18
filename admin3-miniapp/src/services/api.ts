@@ -4,6 +4,7 @@ import { request, setToken } from '@/utils/request';
 import type {
   DashboardStats,
   PageResult,
+  RiskTagItem,
   Statement,
   StatementQuery,
   Transaction,
@@ -269,4 +270,21 @@ export async function getTransactions(
     list: (raw.content || []).map((item) => toTransaction(item, query.statementId)),
     total: raw.totalElements
   };
+}
+
+/**
+ * 按名称批量取风险标签：一次传当前页出现的名称，返回归一化名称 -> 标签数组。
+ * 后端已做名称归一化（去空白+小写），与 Web 端共用同一份标签数据。
+ */
+export async function getRiskTags(
+  subjectType: 'CUSTOMER' | 'COUNTERPARTY',
+  names: string[]
+): Promise<Record<string, RiskTagItem[]>> {
+  if (!isWeapp) {
+    return {};
+  }
+  return request<Record<string, RiskTagItem[]>>('/risk/tags/batch', {
+    method: 'POST',
+    data: { subjectType, names }
+  });
 }

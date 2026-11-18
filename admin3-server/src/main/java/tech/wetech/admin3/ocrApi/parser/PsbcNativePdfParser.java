@@ -47,8 +47,8 @@ public final class PsbcNativePdfParser {
   private static final Pattern DATE = Pattern.compile("(\\d{4}-\\d{2}-\\d{2})");
   private static final Pattern TIME = Pattern.compile("(\\d{1,2}:\\d{2}:\\d{2})");
 
-  /** 行窗口：序号所在行的上下范围（行高约 34.5，拆分字符最多偏移约 6） */
-  private static final float ROW_WINDOW = 8f;
+  /** 首末行没有相邻锚点时，按行高的一半留出上下界 */
+  private static final float EDGE_ROW_MARGIN = 26f;
 
   private PsbcNativePdfParser() {}
 
@@ -154,20 +154,24 @@ public final class PsbcNativePdfParser {
 
   private static void buildTransactions(List<Pos> positions, List<TransactionDTO> out) {
     List<float[]> anchors = findRowAnchors(positions);
-    for (float[] anchor : anchors) {
-      float y = anchor[0];
-      int seqNo = (int) anchor[1];
+    for (int i = 0; i < anchors.size(); i++) {
+      float y = anchors.get(i)[0];
+      int seqNo = (int) anchors.get(i)[1];
+      // 以相邻序号的中线作为行边界：单元格折行后内容会偏离序号行 10pt 以上，
+      // 原来的 ±8pt 窗口会把续行丢掉
+      float yLo = i == 0 ? y - EDGE_ROW_MARGIN : (anchors.get(i - 1)[0] + y) / 2f;
+      float yHi = i == anchors.size() - 1 ? y + EDGE_ROW_MARGIN : (y + anchors.get(i + 1)[0]) / 2f;
 
-      String dateText = pick(positions, 150, 205, y, false);
-      String timeText = pick(positions, 90, 150, y, false);
-      String expenseText = pick(positions, 200, 255, y, true);
-      String incomeText = pick(positions, 255, 312, y, true);
-      String balanceText = pick(positions, 312, 367, y, true);
-      String counterpartyAccount = pick(positions, 367, 425, y, false);
-      String counterpartyName = pick(positions, 425, 480, y, false);
-      String purpose = pick(positions, 530, 595, y, false);
-      String postscript = pick(positions, 595, 640, y, false);
-      String summaryText = pick(positions, 640, 700, y, false);
+      String dateText = pick(positions, 150, 205, yLo, yHi, false);
+      String timeText = pick(positions, 90, 150, yLo, yHi, false);
+      String expenseText = pick(positions, 200, 255, yLo, yHi, true);
+      String incomeText = pick(positions, 255, 312, yLo, yHi, true);
+      String balanceText = pick(positions, 312, 367, yLo, yHi, true);
+      String counterpartyAccount = pick(positions, 367, 425, yLo, yHi, false);
+      String counterpartyName = pick(positions, 425, 480, yLo, yHi, false);
+      String purpose = pick(positions, 530, 595, yLo, yHi, false);
+      String postscript = pick(positions, 595, 640, yLo, yHi, false);
+      String summaryText = pick(positions, 640, 700, yLo, yHi, false);
 
       LocalDate transDate = firstDate(dateText);
       if (transDate == null) {
@@ -240,10 +244,11 @@ public final class PsbcNativePdfParser {
    *
    * @param byRight true=按右边界匹配（金额列右对齐），false=按左边界匹配（文本列）
    */
-  private static String pick(List<Pos> positions, float lo, float hi, float anchorY, boolean byRight) {
+  private static String pick(List<Pos> positions, float lo, float hi,
+                             float yLo, float yHi, boolean byRight) {
     List<Pos> in = new ArrayList<>();
     for (Pos p : positions) {
-      if (p.y < anchorY - ROW_WINDOW || p.y > anchorY + ROW_WINDOW) {
+      if (p.y < yLo || p.y > yHi) {
         continue;
       }
       float edge = byRight ? p.right() : p.x;

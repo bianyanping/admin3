@@ -1,22 +1,28 @@
 import React from 'react';
 import { Text, View } from '@tarojs/components';
 import styles from './index.module.scss';
-import type { Transaction } from '@/types';
+import type { Transaction, RiskTagItem } from '@/types';
 import { formatMoney, formatSignedMoney } from '@/utils/format';
+import RiskTags from '@/components/RiskTags';
 
 export interface TransactionItemProps {
   transaction: Transaction;
+  /** 对方户名对应的风险标签，由明细页批量取回后传入 */
+  tags?: RiskTagItem[];
 }
 
-const TransactionItem: React.FC<TransactionItemProps> = ({ transaction }) => {
+const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, tags }) => {
   const isIncome = transaction.amount >= 0;
 
   return (
     <View className={styles.item}>
       <View className={styles.left}>
-        <Text className={styles.title}>
-          {transaction.counterpartyName || transaction.summary || '未知交易'}
-        </Text>
+        <View className={styles.titleRow}>
+          <Text className={styles.title}>
+            {transaction.counterpartyName || transaction.summary || '未知交易'}
+          </Text>
+          <RiskTags tags={tags} />
+        </View>
         <Text className={styles.meta}>
           {transaction.transDate}
           {transaction.transTime ? ` ${transaction.transTime}` : ''}

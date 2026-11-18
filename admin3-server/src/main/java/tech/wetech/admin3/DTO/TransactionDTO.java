@@ -15,6 +15,7 @@ public class TransactionDTO {
   private BigDecimal amount;          // 金额（带符号：正=收入，负=支出）
   private BigDecimal balance;         // 账户余额
   private String direction;           // 借贷标志：出/入/收入/支出
+  private String rawDirection;        // 数据源原始方向（如微信证明的「其他」）
   private String ocrDirection;        // OCR识别的借贷标志
   private String counterpartyAccount; // 对方账号
   private String counterpartyName;    // 对方户名

@@ -26,7 +26,7 @@
           <installDirectory>target</installDirectory>
           <nodeVersion>v16.13.1</nodeVersion>
           <yarnVersion>v1.22.17</yarnVersion>
-          <nodeDownloadRoot>https://repo.huaweicloud.com/node/</nodeDownloadRoot>
+          <nodeDownloadRoot>https://registry.npmmirror.com/-/binary/node/</nodeDownloadRoot>
           <yarnDownloadRoot>https://repo.huaweicloud.com/yarn/</yarnDownloadRoot>
         </configuration>
         <executions>
@@ -41,6 +41,9 @@
             <goals>
               <goal>yarn</goal>
             </goals>
+            <configuration>
+              <arguments>config set registry https://registry.npmmirror.com</arguments>
+            </configuration>
           </execution>
           <execution>
             <id>yarn install</id>

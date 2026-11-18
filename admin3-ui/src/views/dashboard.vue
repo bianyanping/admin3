@@ -97,7 +97,12 @@
                 <span :class="row.amount < 0 ? 'expense' : 'income'">{{ money(row.amount) }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="counterpartyName" label="对方户名" min-width="160" show-overflow-tooltip></el-table-column>
+            <el-table-column label="对方户名" min-width="170">
+              <template #default="{ row }">
+                <span>{{ row.counterpartyName }}</span>
+                <RiskTags :tags="counterpartyTags.tagsFor(row.counterpartyName)" />
+              </template>
+            </el-table-column>
             <el-table-column prop="summary" label="摘要" min-width="120" show-overflow-tooltip></el-table-column>
             <template #empty>当前范围内没有大额流水</template>
           </el-table>
@@ -132,6 +137,7 @@
             <div class="rank-body">
               <div class="rank-line">
                 <span class="rank-name">{{ c.name }}</span>
+                <RiskTags :tags="counterpartyTags.tagsFor(c.name)" />
                 <span class="rank-amount">{{ money(c.amount) }}</span>
               </div>
               <div class="rank-bar">
@@ -151,6 +157,8 @@ import {useRouter} from 'vue-router';
 import {Refresh} from '@element-plus/icons-vue';
 import Schart from 'vue-schart';
 import {getDashboard, listStatements} from '../api/bankStatement';
+import {useRiskTags} from '../composables/useRiskTags';
+import RiskTags from '../components/RiskTags.vue';
 
 const router = useRouter();
 
@@ -176,6 +184,7 @@ const stats = reactive<any>({
 const daily = computed<any[]>(() => stats.daily || []);
 const categories = computed<any[]>(() => stats.categories || []);
 const topCounterparties = computed<any[]>(() => stats.topCounterparties || []);
+const counterpartyTags = useRiskTags('COUNTERPARTY');
 const totalAmount = computed(() => Number(stats.totalIncome || 0) + Number(stats.totalExpense || 0));
 
 const money = (v: any) => Number(v || 0).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
@@ -235,6 +244,11 @@ const load = () => {
     accountHolder: accountHolder.value || undefined,
   }).then((res: any) => {
     Object.assign(stats, res.data || {});
+    // TOP 对手与大额流水中的对手名称批量取标签
+    counterpartyTags.load([
+      ...(stats.topCounterparties || []).map((item: any) => item.name),
+      ...(stats.recentLarge || []).map((item: any) => item.counterpartyName),
+    ]);
     buildCharts();
   });
 };

@@ -4,7 +4,7 @@ import {onBeforeUnmount, onMounted, ref, watch, type Ref} from 'vue';
  * 把容器高度同步给 el-table 的 height，让表格在容器内滚动。
  * 这样页面外层不出现滚动条，表头、筛选栏、分页始终固定可见。
  */
-export function useFillHeight(target: Ref<HTMLElement | null>, min = 180) {
+export function useFillHeight(target: Ref<any>, min = 180) {
 	const height = ref<number>();
 	let observer: ResizeObserver | null = null;
 

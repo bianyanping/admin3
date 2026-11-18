@@ -39,6 +39,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
   java.util.Optional<User> findByWxOpenid(String wxOpenid);
 
+  java.util.Optional<User> findByUsername(String username);
+
   /**
    * 清理用户与角色的关联（用户删除前调用）。
    */

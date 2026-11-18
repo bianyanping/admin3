@@ -1,22 +1,28 @@
 import React from 'react';
 import { Text, View } from '@tarojs/components';
 import styles from './index.module.scss';
-import type { Statement } from '@/types';
+import type { Statement, RiskTagItem } from '@/types';
 import { formatMoney, maskAccount } from '@/utils/format';
+import RiskTags from '@/components/RiskTags';
 
 export interface StatementCardProps {
   statement: Statement;
+  /** 户名对应的风险标签，由列表页批量取回后传入 */
+  tags?: RiskTagItem[];
   onClick?: (statement: Statement) => void;
 }
 
-const StatementCard: React.FC<StatementCardProps> = ({ statement, onClick }) => (
+const StatementCard: React.FC<StatementCardProps> = ({ statement, tags, onClick }) => (
   <View className={styles.card} onClick={() => onClick?.(statement)}>
     <View className={styles.head}>
       <Text className={styles.bank}>{statement.bankName}</Text>
       <Text className={styles.count}>{statement.transactionCount} 笔</Text>
     </View>
 
-    <Text className={styles.holder}>{statement.accountHolder}</Text>
+    <View className={styles.holderRow}>
+      <Text className={styles.holder}>{statement.accountHolder}</Text>
+      <RiskTags tags={tags} />
+    </View>
     <Text className={styles.account}>{maskAccount(statement.accountNo)}</Text>
 
     <View className={styles.period}>

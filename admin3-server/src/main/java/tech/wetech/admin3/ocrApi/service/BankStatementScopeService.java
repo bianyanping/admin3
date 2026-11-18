@@ -76,6 +76,24 @@ public class BankStatementScopeService {
   }
 
   /**
+   * 是否管理员：内置 admin 或拥有「超级管理员」角色（拥有全部权限）。
+   *
+   * <p>管理员在网贷分析、风险数据库、关键词分组与风险警示中均按全量处理。
+   */
+  @Transactional(readOnly = true)
+  public boolean isAdmin(Long userId) {
+    if (userId == null) {
+      return false;
+    }
+    return userRepository.findById(userId).map(user -> {
+      if ("admin".equalsIgnoreCase(user.getUsername())) {
+        return true;
+      }
+      return user.getRoles().stream().anyMatch(role -> "超级管理员".equals(role.getName()));
+    }).orElse(false);
+  }
+
+  /**
    * 判断用户是否可见该流水单：组织子树内 或 被分享给该用户。
    */
   @Transactional(readOnly = true)

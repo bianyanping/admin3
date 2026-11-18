@@ -83,6 +83,30 @@ const routes: RouteRecordRaw[] = [
         component: () => import(/* webpackChunkName: "bankStatement" */ '../views/bank-statement-transactions.vue'),
       },
       {
+        path: '/lending-analysis',
+        name: 'lendingAnalysis',
+        meta: {
+          title: '网贷分析',
+        },
+        component: () => import(/* webpackChunkName: "lending" */ '../views/lending-analysis.vue'),
+      },
+      {
+        path: '/lending-platforms',
+        name: 'lendingPlatforms',
+        meta: {
+          title: '网贷关键词库',
+        },
+        component: () => import(/* webpackChunkName: "lending" */ '../views/lending-platforms.vue'),
+      },
+      {
+        path: '/risk-database',
+        name: 'riskDatabase',
+        meta: {
+          title: '风险数据库',
+        },
+        component: () => import(/* webpackChunkName: "risk" */ '../views/risk-database.vue'),
+      },
+      {
         path: '/tabs',
         name: 'tabs',
         meta: {

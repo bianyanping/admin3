@@ -57,6 +57,7 @@ public class UserService {
     User user = new User();
     user.setUsername(username);
     user.setAvatar(avatar);
+    user.setIntro(InspirationalQuotes.random());
     user.setGender(gender);
     user.setState(state);
     user.setCreatedTime(LocalDateTime.now());
@@ -116,6 +117,13 @@ public class UserService {
     user = userRepository.save(user);
     DomainEventPublisher.instance().publish(new UserUpdated(user));
     return user;
+  }
+
+  @Transactional
+  public User updateIntro(Long userId, String intro) {
+    User user = findUserById(userId);
+    user.setIntro(intro == null || intro.isBlank() ? null : intro.trim());
+    return userRepository.save(user);
   }
 
   @Transactional

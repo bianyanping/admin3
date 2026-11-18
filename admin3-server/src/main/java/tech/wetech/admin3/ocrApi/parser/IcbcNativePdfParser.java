@@ -7,13 +7,17 @@ import tech.wetech.admin3.DTO.StatementHeader;
 import tech.wetech.admin3.DTO.StatementSummary;
 import tech.wetech.admin3.DTO.TransactionDTO;
 import tech.wetech.admin3.ocrApi.layout.AmountNormalizer;
+import tech.wetech.admin3.ocrApi.layout.PdfColumnTableReader;
 
 import java.io.File;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -54,6 +58,16 @@ public final class IcbcNativePdfParser {
   /** 分页行：---- 第1页/共3页 ---- */
   private static final Pattern PAGE_SEP = Pattern.compile("^[-—\\s]*第\\d+页[/／]共\\d+页[-—\\s]*$");
 
+  /**
+   * 单位账户版式标记：表头为「交易时间 借贷标志 发生额 余额 对方单位 对方账号 摘要 用途 附言」，
+   * 对方单位在摘要之前，与个人版「摘要 … 对方账号 对方户名」的顺序相反，必须按表头列坐标取值。
+   */
+  private static final String CORPORATE_MARKER = "对方单位";
+  private static final Pattern ROW_DATETIME = Pattern.compile("\\d{4}-\\d{2}-\\d{2}(\\s+\\d{2}:\\d{2}:\\d{2})?");
+  private static final Pattern ROW_DATE = Pattern.compile("\\d{4}-\\d{2}-\\d{2}");
+  private static final Set<String> COLUMN_REQUIRED = Set.of(
+    "amount", "balance", "summary", "counterpartyName");
+
   /** 金额比较容差 */
   private static final BigDecimal TOLERANCE = new BigDecimal("0.01");
 
@@ -78,6 +92,7 @@ public final class IcbcNativePdfParser {
       PDFTextStripper stripper = new PDFTextStripper();
       stripper.setSortByPosition(true);
 
+      boolean corporate = false;
       for (int p = 1; p <= doc.getNumberOfPages(); p++) {
         stripper.setStartPage(p);
         stripper.setEndPage(p);
@@ -86,14 +101,23 @@ public final class IcbcNativePdfParser {
 
         if (p == 1) {
           fillHeader(pageText, header);
+          corporate = pageText.contains(CORPORATE_MARKER);
         }
 
+        if (corporate) {
+          continue;
+        }
         for (String line : pageText.split("\\r?\\n")) {
           RawRow row = parseRow(line.trim());
           if (row != null) {
             rows.add(row);
           }
         }
+      }
+
+      // 单位账户：对方单位/摘要等列顺序与个人版相反，按表头坐标取列，避免按 token 先后错配
+      if (corporate) {
+        rows = parseByColumns(doc);
       }
     }
 
@@ -133,7 +157,8 @@ public final class IcbcNativePdfParser {
   /** 解析出的一行原始数据：先不定方向，等全部行收齐后用余额差统一判定 */
   private record RawRow(LocalDate date, String time, BigDecimal magnitude, BigDecimal balance,
                         boolean negativeSign, boolean positiveSign, String directionFlag,
-                        String counterpartyAccount, List<String> texts) {
+                        String counterpartyAccount, List<String> texts,
+                        String summary, String counterpartyName, String purpose, String postscript) {
   }
 
   private record Amt(BigDecimal value, boolean negative, boolean positive) {
@@ -203,7 +228,101 @@ public final class IcbcNativePdfParser {
 
     return new RawRow(date, transTime, amountToken.value().abs(), balance,
       amountToken.negative(), amountToken.positive(), directionFlag,
-      counterpartyAccount, texts);
+      counterpartyAccount, texts, null, null, null, null);
+  }
+
+  /**
+   * 按表头坐标读取单位账户版式。
+   *
+   * <p>表头：交易时间 | 借贷标志 | 发生额 | 余额 | 对方单位 | 对方账号 | 摘要 | 用途 | 附言。
+   * 逐行 token 解析会把「对方单位」当成第一个文本（摘要）、把「摘要」当成最后一个文本（户名），
+   * 因此改为按列中心取单元格。
+   */
+  private static List<RawRow> parseByColumns(PDDocument doc) throws IOException {
+    Map<String, String> labels = columnLabels();
+    List<PdfColumnTableReader.Row> columnRows = PdfColumnTableReader.read(
+      doc, labels, COLUMN_REQUIRED, "transTime", ROW_DATETIME);
+    if (columnRows.isEmpty()) {
+      columnRows = PdfColumnTableReader.read(doc, labels, COLUMN_REQUIRED, "transDate", ROW_DATE);
+    }
+
+    List<RawRow> result = new ArrayList<>(columnRows.size());
+    for (PdfColumnTableReader.Row row : columnRows) {
+      String dateTime = row.get("transTime");
+      if (dateTime == null) {
+        dateTime = row.get("transDate");
+      }
+      if (dateTime == null) {
+        continue;
+      }
+      Matcher dm = ROW_DATETIME.matcher(dateTime);
+      if (!dm.find()) {
+        continue;
+      }
+      String stamp = dm.group();
+      LocalDate date = parseDate(stamp.substring(0, 10));
+      String time = null;
+      int space = stamp.indexOf(' ');
+      if (space > 0) {
+        time = stamp.substring(space + 1).trim();
+      }
+
+      BigDecimal amount = money(row.get("amount"));
+      BigDecimal balance = money(row.get("balance"));
+      if (amount == null || balance == null) {
+        continue;
+      }
+      String flag = directionFlagOf(blankToNull(row.get("directionFlag")) == null
+        ? "" : row.get("directionFlag").trim());
+
+      result.add(new RawRow(date, time, amount.abs(), balance, false, false, flag,
+        blankToNull(row.get("counterpartyAccount")), List.of(),
+        blankToNull(row.get("summary")), blankToNull(row.get("counterpartyName")),
+        blankToNull(row.get("purpose")), blankToNull(row.get("postscript"))));
+    }
+    return result;
+  }
+
+  /** 表头文字 → 字段名；同时兼容「对方单位/对方户名」「发生额/交易金额」等叫法 */
+  private static Map<String, String> columnLabels() {
+    Map<String, String> labels = new LinkedHashMap<>();
+    labels.put("交易时间", "transTime");
+    labels.put("交易日期", "transDate");
+    labels.put("借贷标志", "directionFlag");
+    labels.put("发生额", "amount");
+    labels.put("交易金额", "amount");
+    labels.put("余额", "balance");
+    labels.put("账户余额", "balance");
+    labels.put("对方单位", "counterpartyName");
+    labels.put("对方户名", "counterpartyName");
+    labels.put("对方账号", "counterpartyAccount");
+    labels.put("摘要", "summary");
+    labels.put("用途", "purpose");
+    labels.put("附言", "postscript");
+    return labels;
+  }
+
+  private static BigDecimal money(String s) {
+    if (s == null) {
+      return null;
+    }
+    String digits = s.replaceAll("[^0-9.,\\-]", "");
+    if (digits.isEmpty()) {
+      return null;
+    }
+    try {
+      return AmountNormalizer.normalize(digits);
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  private static String blankToNull(String s) {
+    if (s == null) {
+      return null;
+    }
+    String v = s.replaceAll("[\\s\\u00A0\\u3000]+", " ").trim();
+    return v.isEmpty() ? null : v;
   }
 
   /**
@@ -260,12 +379,18 @@ public final class IcbcNativePdfParser {
       tx.setDirection(amount.signum() >= 0 ? "入" : "出");
       tx.setAmountSignExplicit(r.negativeSign() || r.positiveSign());
       tx.setCounterpartyAccount(r.counterpartyAccount());
-      if (!r.texts().isEmpty()) {
+      if (r.summary() != null) {
+        tx.setSummary(truncate(r.summary(), 200));
+      } else if (!r.texts().isEmpty()) {
         tx.setSummary(truncate(r.texts().get(0), 200));
       }
-      if (r.texts().size() >= 2) {
+      if (r.counterpartyName() != null) {
+        tx.setCounterpartyName(truncate(r.counterpartyName(), 100));
+      } else if (r.texts().size() >= 2) {
         tx.setCounterpartyName(truncate(r.texts().get(r.texts().size() - 1), 100));
       }
+      tx.setPurpose(truncate(r.purpose(), 200));
+      tx.setPostscript(truncate(r.postscript(), 200));
       list.add(tx);
     }
     return list;

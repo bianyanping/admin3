@@ -96,6 +96,7 @@ public class MiniAppController {
     if (user.isLocked()) {
       throw new BusinessException(CommonResultStatus.UNAUTHORIZED, "用户已经停用，请与管理员联系");
     }
+    ensureNotExpired(user);
     if (user.getWxOpenid() != null && !user.getWxOpenid().equals(openid)) {
       throw new BusinessException(CommonResultStatus.FAIL, "该账号已绑定其他微信，请先联系管理员解绑");
     }
@@ -105,6 +106,7 @@ public class MiniAppController {
   }
 
   private LoginResult issueSession(User user, String openid) {
+    ensureNotExpired(user);
     UserCredential credential = credentialRepository
       .findCredential(user.getUsername(), UserCredential.IdentityType.PASSWORD)
       .orElse(null);
@@ -121,6 +123,15 @@ public class MiniAppController {
     MiniUser miniUser = new MiniUser(user.getId(), user.getUsername(), user.getUsername(), user.getAvatar(),
       orgName, user.findPermissions(), TIME_FORMATTER.format(LocalDateTime.now()));
     return new LoginResult(true, openid, token, miniUser);
+  }
+
+  /**
+   * 账号过期后禁止登录
+   */
+  private void ensureNotExpired(User user) {
+    if (user.getExpireTime() != null && !user.getExpireTime().isAfter(LocalDateTime.now())) {
+      throw new BusinessException(CommonResultStatus.UNAUTHORIZED, "账号已过期，请联系管理员开通权限");
+    }
   }
 
   /**

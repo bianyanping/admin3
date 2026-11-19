@@ -17,6 +17,7 @@ import tech.wetech.admin3.sys.repository.UserCredentialRepository;
 import tech.wetech.admin3.sys.service.SessionService;
 import tech.wetech.admin3.sys.service.dto.UserinfoDTO;
 
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static tech.wetech.admin3.sys.model.UserCredential.IdentityType.PASSWORD;
@@ -45,6 +46,9 @@ public class DefaultSessionService implements SessionService {
       User user = credential.getUser();
       if (user.isLocked()) {
         throw new UserException(CommonResultStatus.UNAUTHORIZED, "用户已经停用，请与管理员联系");
+      }
+      if (user.getExpireTime() != null && !user.getExpireTime().isAfter(LocalDateTime.now())) {
+        throw new UserException(CommonResultStatus.UNAUTHORIZED, "账号已过期，请联系管理员开通权限");
       }
       String token = UUID.randomUUID().toString().replace("-", "");
       UserinfoDTO userinfo = new UserinfoDTO(token, user.getId(), user.getUsername(), user.getAvatar(), user.getIntro(), new UserinfoDTO.Credential(credential.getIdentifier(), credential.getIdentityType()), user.findPermissions());

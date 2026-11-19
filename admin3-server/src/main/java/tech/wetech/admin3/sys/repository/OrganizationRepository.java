@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 import tech.wetech.admin3.sys.model.Organization;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * @author cjbi
@@ -15,4 +16,6 @@ public interface OrganizationRepository extends JpaRepository<Organization, Long
 
   @Query("from Organization org where org.parent.id=:parentId")
   List<Organization> findByParentId(Long parentId);
+
+  Optional<Organization> findByName(String name);
 }

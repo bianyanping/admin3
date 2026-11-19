@@ -172,6 +172,16 @@ export function importStatement(formData: FormData, options?: { silent?: boolean
   } as any);
 }
 
+// 下载流水导入 Excel 模板（需要鉴权，用 blob）
+export function downloadImportTemplate() {
+  return request({
+    url: `${BASE_URI}/bank-statements/import-template`,
+    method: 'get',
+    responseType: 'blob',
+    timeout: 60000
+  });
+}
+
 // 下载原始 PDF 文件（需要鉴权，用 blob）
 export function downloadSourceFile(id: number) {
   return request({

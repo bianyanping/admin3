@@ -1,7 +1,7 @@
 import request from '../utils/request';
 import {BASE_URI} from './base';
 
-export function getUserList(data: { page: number; size: number; username?: string, state?: string, roleId?: number }) {
+export function getUserList(data: { page: number; size: number; username?: string, state?: string, expired?: string, roleId?: number }) {
     return request({
         url: `${BASE_URI}/users`,
         method: 'get',
@@ -9,7 +9,7 @@ export function getUserList(data: { page: number; size: number; username?: strin
     });
 };
 
-export function createUser(data: { username: string; gender: string; avatar: string; }) {
+export function createUser(data: { username: string; gender: string; avatar: string; expireTime?: string | null; }) {
     return request({
         url: `${BASE_URI}/users`,
         method: 'post',
@@ -17,7 +17,7 @@ export function createUser(data: { username: string; gender: string; avatar: str
     });
 }
 
-export function updateUser(userId: number, data: { username: string; gender: string; avatar: string; }) {
+export function updateUser(userId: number, data: { username: string; gender: string; avatar: string; expireTime?: string | null; }) {
     return request({
         url: `${BASE_URI}/users/${userId}`,
         method: 'put',

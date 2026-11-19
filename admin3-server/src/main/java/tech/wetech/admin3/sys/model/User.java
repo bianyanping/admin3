@@ -44,6 +44,12 @@ public class User extends BaseEntity {
   @Column
   private LocalDateTime createdTime;
 
+  /**
+   * 账号过期时间，为空表示永不过期
+   */
+  @Column
+  private LocalDateTime expireTime;
+
   @ManyToMany(fetch = LAZY, cascade = CascadeType.DETACH)
   @JoinTable(name = "user_role",
     joinColumns = @JoinColumn(name = "user_id", referencedColumnName = "id"),
@@ -157,6 +163,14 @@ public class User extends BaseEntity {
 
   public void setCreatedTime(LocalDateTime createdTime) {
     this.createdTime = createdTime;
+  }
+
+  public LocalDateTime getExpireTime() {
+    return expireTime;
+  }
+
+  public void setExpireTime(LocalDateTime expireTime) {
+    this.expireTime = expireTime;
   }
 
   public Set<Role> getRoles() {

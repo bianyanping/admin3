@@ -57,6 +57,10 @@
                 <el-option key="1" label="正常" value="NORMAL"></el-option>
                 <el-option key="2" label="锁定" value="LOCKED"></el-option>
               </el-select>
+              <el-select v-model="query.expired" placeholder="过期状态" class="handle-select" clearable>
+                <el-option key="1" label="已过期" value="true"></el-option>
+                <el-option key="2" label="未过期" value="false"></el-option>
+              </el-select>
               <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
               <el-button type="primary" :icon="Plus" @click="openAddUser"
                          v-action:user:create>新增
@@ -94,6 +98,13 @@
               </el-table-column>
 
               <el-table-column prop="createdTime" label="注册时间"></el-table-column>
+              <el-table-column label="过期时间">
+                <template #default="{ row }">
+                  <span :class="isExpired(row.expireTime) ? 'red' : ''">
+                    {{ formatExpireTime(row.expireTime) }}
+                  </span>
+                </template>
+              </el-table-column>
               <el-table-column label="所属组织">
                 <template #default="{ row }">{{ lastOrgName(row.orgFullName) }}</template>
               </el-table-column>
@@ -155,6 +166,7 @@
                     </div>
                     <div class="uc-sub">ID {{ row.id }} · {{ row.gender === 'MALE' ? '男' : '女' }}</div>
                     <div class="uc-sub">{{ lastOrgName(row.orgFullName) || '未分配组织' }}</div>
+                    <div class="uc-sub">过期时间：{{ formatExpireTime(row.expireTime) }}</div>
                     <div class="uc-sub">{{ row.createdTime }}</div>
                   </div>
                 </div>
@@ -270,6 +282,16 @@
             <el-radio label="FEMALE">女</el-radio>
           </el-radio-group>
         </el-form-item>
+        <el-form-item label="过期时间">
+          <el-date-picker
+            v-model="form.expireTime"
+            type="datetime"
+            placeholder="不填表示永不过期"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            clearable
+            style="width: 100%"
+          ></el-date-picker>
+        </el-form-item>
         <el-form-item label="头像">
           <AvatarUpload :img-src="form.avatar" @on-select="onAvatarSelect"/>
         </el-form-item>
@@ -296,6 +318,16 @@
             <el-radio label="MALE">男</el-radio>
             <el-radio label="FEMALE">女</el-radio>
           </el-radio-group>
+        </el-form-item>
+        <el-form-item label="过期时间">
+          <el-date-picker
+            v-model="form.expireTime"
+            type="datetime"
+            placeholder="不填表示永不过期"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            clearable
+            style="width: 100%"
+          ></el-date-picker>
         </el-form-item>
         <el-form-item label="头像">
           <AvatarUpload :img-src="form.avatar" @on-select="onAvatarSelect"/>
@@ -360,6 +392,18 @@ const handleNodeSelected = (node: OrgTreeNode) => {
 
 /** 所属组织只展示最末级名称 */
 const lastOrgName = (fullName?: string) => (fullName ? fullName.split('-').pop() : '');
+
+/** 过期时间：为空表示永不过期 */
+const formatExpireTime = (expireTime?: string | null) => (expireTime ? expireTime.replace('T', ' ') : '永不过期');
+
+/** 是否已过期（兼容后端 yyyy-MM-dd HH:mm:ss 格式） */
+const isExpired = (expireTime?: string | null) => {
+  if (!expireTime) {
+    return false;
+  }
+  const time = new Date(expireTime.replace(' ', 'T')).getTime();
+  return !Number.isNaN(time) && time <= Date.now();
+};
 
 /** 新增用户：默认归属到当前选中的组织 */
 const openAddUser = () => {
@@ -475,12 +519,14 @@ interface TableItem {
   avatar: string;
   state: string;
   createdTime: string;
+  expireTime: string | null;
   orgFullName: string;
 }
 
 const query = reactive({
   username: '',
   state: '',
+  expired: '',
   pageIndex: 1,
   pageSize: 10
 });
@@ -499,6 +545,7 @@ const getUserData = () => {
     size: query.pageSize,
     username: query.username || undefined,
     state: query.state || undefined,
+    expired: query.expired || undefined,
   }).then(res => {
     tableData.value = res.data.list;
     pageTotal.value = res.data.total;
@@ -548,6 +595,7 @@ class User {
   gender = 'MALE';
   avatar = '';
   organizationId = 1;
+  expireTime: string | null = null;
 }
 
 let id: number = 0;
@@ -560,6 +608,7 @@ const saveAdd = () => {
     return;
   }
   form.organizationId = node.id;
+  form.expireTime = form.expireTime || null;
   createUser(form).then(res => {
     getUserData();
     ElMessage.success(`新增成功`);
@@ -571,6 +620,7 @@ const handleEdit = (index: number, row: any) => {
   form.username = row.username;
   form.gender = row.gender;
   form.avatar = row.avatar;
+  form.expireTime = row.expireTime || null;
   editVisible.value = true;
 };
 const saveEdit = () => {
@@ -581,7 +631,7 @@ const saveEdit = () => {
     return;
   }
   form.organizationId = node.id;
-  console.log(form);
+  form.expireTime = form.expireTime || null;
   updateUser(id, form).then(res => {
     getUserData();
     ElMessage.success(`修改成功`);

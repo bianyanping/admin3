@@ -11,8 +11,11 @@ import tech.wetech.admin3.sys.event.UserDeleted;
 import tech.wetech.admin3.sys.event.UserUpdated;
 import tech.wetech.admin3.sys.exception.UserException;
 import tech.wetech.admin3.sys.model.Organization;
+import tech.wetech.admin3.sys.model.Role;
 import tech.wetech.admin3.sys.model.User;
 import tech.wetech.admin3.sys.model.UserCredential;
+import tech.wetech.admin3.sys.repository.OrganizationRepository;
+import tech.wetech.admin3.sys.repository.RoleRepository;
 import tech.wetech.admin3.sys.repository.SessionRepository;
 import tech.wetech.admin3.sys.repository.StoredEventRepository;
 import tech.wetech.admin3.sys.repository.UserCredentialRepository;
@@ -39,21 +42,42 @@ public class UserService {
    */
   public static final String DEFAULT_PASSWORD = "123456";
 
+  /**
+   * 注册用户默认角色
+   */
+  public static final String REGISTER_ROLE_NAME = "普通用户";
+
+  /**
+   * 注册用户默认归属组织
+   */
+  public static final String REGISTER_ORGANIZATION_NAME = "测试账号";
+
+  /**
+   * 注册账号有效天数
+   */
+  public static final int REGISTER_VALID_DAYS = 1;
+
   private final UserRepository userRepository;
   private final UserCredentialRepository userCredentialRepository;
   private final StoredEventRepository storedEventRepository;
   private final SessionRepository sessionRepository;
+  private final RoleRepository roleRepository;
+  private final OrganizationRepository organizationRepository;
 
   public UserService(UserRepository userRepository, UserCredentialRepository userCredentialRepository,
-                     StoredEventRepository storedEventRepository, SessionRepository sessionRepository) {
+                     StoredEventRepository storedEventRepository, SessionRepository sessionRepository,
+                     RoleRepository roleRepository, OrganizationRepository organizationRepository) {
     this.userRepository = userRepository;
     this.userCredentialRepository = userCredentialRepository;
     this.storedEventRepository = storedEventRepository;
     this.sessionRepository = sessionRepository;
+    this.roleRepository = roleRepository;
+    this.organizationRepository = organizationRepository;
   }
 
   @Transactional
-  public User createUser(String username, String avatar, User.Gender gender, User.State state, Organization organization) {
+  public User createUser(String username, String avatar, User.Gender gender, User.State state,
+                         Organization organization, LocalDateTime expireTime) {
     User user = new User();
     user.setUsername(username);
     user.setAvatar(avatar);
@@ -61,10 +85,38 @@ public class UserService {
     user.setGender(gender);
     user.setState(state);
     user.setCreatedTime(LocalDateTime.now());
+    user.setExpireTime(expireTime);
     user.setOrganization(organization);
     user = userRepository.save(user);
     // 创建默认密码凭证
     saveCredential(user, DEFAULT_PASSWORD);
+    DomainEventPublisher.instance().publish(new UserCreated(user));
+    return user;
+  }
+
+  /**
+   * 用户自助注册：归属「测试账号」组织，授予「普通用户」角色，有效期 1 天
+   */
+  @Transactional
+  public User register(String username, String password) {
+    if (userRepository.findByUsername(username).isPresent()) {
+      throw new UserException(CommonResultStatus.PARAM_ERROR, "用户名已存在");
+    }
+    Role role = roleRepository.findByName(REGISTER_ROLE_NAME)
+      .orElseThrow(() -> new UserException(CommonResultStatus.FAIL, "系统未配置「" + REGISTER_ROLE_NAME + "」角色"));
+    Organization organization = organizationRepository.findByName(REGISTER_ORGANIZATION_NAME)
+      .orElseThrow(() -> new UserException(CommonResultStatus.FAIL, "系统未配置「" + REGISTER_ORGANIZATION_NAME + "」组织"));
+    User user = new User();
+    user.setUsername(username);
+    user.setIntro(InspirationalQuotes.random());
+    user.setGender(User.Gender.MALE);
+    user.setState(User.State.NORMAL);
+    user.setCreatedTime(LocalDateTime.now());
+    user.setExpireTime(LocalDateTime.now().plusDays(REGISTER_VALID_DAYS));
+    user.setOrganization(organization);
+    user.getRoles().add(role);
+    user = userRepository.save(user);
+    saveCredential(user, password);
     DomainEventPublisher.instance().publish(new UserCreated(user));
     return user;
   }
@@ -94,10 +146,13 @@ public class UserService {
       .orElseThrow(() -> new BusinessException(RECORD_NOT_EXIST));
   }
 
-  public PageDTO<OrgUserDTO> findOrgUsers(Pageable pageable, String username, User.State state, Organization organization) {
-    Page<User> page = userRepository.findOrgUsers(pageable, username, state, organization, organization.makeSelfAsParentIds());
+  public PageDTO<OrgUserDTO> findOrgUsers(Pageable pageable, String username, User.State state,
+                                          Boolean expired, Organization organization) {
+    Page<User> page = userRepository.findOrgUsers(pageable, username, state, expired,
+      organization, organization.makeSelfAsParentIds(), LocalDateTime.now());
     return new PageDTO<>(page.getContent().stream().map(u ->
-        new OrgUserDTO(u.getId(), u.getUsername(), u.getAvatar(), u.getGender(), u.getState(), u.getOrgFullName(), u.getCreatedTime()))
+        new OrgUserDTO(u.getId(), u.getUsername(), u.getAvatar(), u.getGender(), u.getState(), u.getOrgFullName(),
+          u.getCreatedTime(), u.getExpireTime()))
       .collect(Collectors.toList()), page.getTotalElements());
   }
 
@@ -108,12 +163,14 @@ public class UserService {
 
 
   @Transactional
-  public User updateUser(Long userId, String avatar, User.Gender gender, User.State state, Organization organization) {
+  public User updateUser(Long userId, String avatar, User.Gender gender, User.State state,
+                         Organization organization, LocalDateTime expireTime) {
     User user = findUserById(userId);
     user.setAvatar(avatar);
     user.setGender(gender);
     user.setState(state);
     user.setOrganization(organization);
+    user.setExpireTime(expireTime);
     user = userRepository.save(user);
     DomainEventPublisher.instance().publish(new UserUpdated(user));
     return user;

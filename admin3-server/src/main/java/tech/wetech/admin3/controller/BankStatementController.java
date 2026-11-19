@@ -5,6 +5,7 @@ import jakarta.persistence.criteria.Predicate;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -1355,6 +1356,24 @@ public class BankStatementController {
       .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
       .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
       .body(sb.toString().getBytes(StandardCharsets.UTF_8));
+  }
+
+  /**
+   * 下载流水导入 Excel 模板（与 Excel 导入解析规则保持一致）。
+   */
+  @GetMapping("/import-template")
+  public ResponseEntity<Resource> downloadImportTemplate() {
+    ClassPathResource resource = new ClassPathResource("template/bank-statement-import-template.xlsx");
+    if (!resource.exists()) {
+      throw new BusinessException(CommonResultStatus.RECORD_NOT_EXIST, "导入模板不存在");
+    }
+    String fileName = URLEncoder.encode("银行流水导入模板.xlsx", StandardCharsets.UTF_8)
+      .replace("+", "%20");
+    return ResponseEntity.ok()
+      .contentType(MediaType.parseMediaType(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+      .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
+      .body(resource);
   }
 
   /**

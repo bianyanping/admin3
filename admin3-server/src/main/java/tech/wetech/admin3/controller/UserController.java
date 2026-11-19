@@ -15,6 +15,8 @@ import tech.wetech.admin3.sys.service.OrganizationService;
 import tech.wetech.admin3.sys.service.UserService;
 import tech.wetech.admin3.sys.service.dto.PageDTO;
 
+import java.time.LocalDateTime;
+
 /**
  * @author cjbi
  */
@@ -43,7 +45,8 @@ public class UserController {
     // 所属组织必须落在当前用户可见范围内，防止越权挂到上级节点
     Organization organization = organizationService.restrictToCurrentUserScope(
       organizationService.findOrganization(request.organizationId()));
-    return new ResponseEntity<>(userService.createUser(request.username(), request.avatar(), request.gender(), User.State.NORMAL, organization), HttpStatus.CREATED);
+    return new ResponseEntity<>(userService.createUser(request.username(), request.avatar(), request.gender(),
+      User.State.NORMAL, organization, request.expireTime()), HttpStatus.CREATED);
   }
 
   @RequiresPermissions("user:update")
@@ -51,7 +54,8 @@ public class UserController {
   public ResponseEntity<User> updateUser(@PathVariable Long userId, @RequestBody @Valid UpdateUserRequest request) {
     Organization organization = organizationService.restrictToCurrentUserScope(
       organizationService.findOrganization(request.organizationId()));
-    return ResponseEntity.ok(userService.updateUser(userId, request.avatar(), request.gender(), User.State.NORMAL, organization));
+    return ResponseEntity.ok(userService.updateUser(userId, request.avatar(), request.gender(),
+      User.State.NORMAL, organization, request.expireTime()));
   }
 
   @RequiresPermissions("user:update")
@@ -112,11 +116,11 @@ public class UserController {
   }
 
   record CreateUserRequest(@NotBlank String username, @NotNull User.Gender gender,
-                           String avatar, Long organizationId) {
+                           String avatar, Long organizationId, LocalDateTime expireTime) {
   }
 
   record UpdateUserRequest(@NotNull User.Gender gender,
-                           String avatar, Long organizationId) {
+                           String avatar, Long organizationId, LocalDateTime expireTime) {
   }
 
 }

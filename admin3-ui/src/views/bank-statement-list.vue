@@ -141,30 +141,34 @@
     </div>
 
     <!-- 上传弹窗 -->
-    <el-dialog title="上传银行流水 PDF" v-model="uploadVisible" width="min(520px, 92vw)">
+    <el-dialog title="上传银行流水（PDF / Excel）" v-model="uploadVisible" width="min(520px, 92vw)">
       <el-form label-width="90px">
         <el-form-item label="银行">
           <el-select v-model="uploadForm.bankCode" placeholder="可自动识别；识别不到时会提示手动选择" clearable style="width: 100%">
             <el-option v-for="b in bankOptions" :key="b.value" :label="b.label" :value="b.value"></el-option>
           </el-select>
         </el-form-item>
-        <el-form-item label="PDF 文件">
+        <el-form-item label="模板">
+          <el-button link type="primary" :icon="Download" :loading="templateDownloading" @click="downloadTemplate">下载导入模板</el-button>
+          <span style="color:#909399;font-size:12px;margin-left:8px">按模板表头填写后上传，支持 PDF / Excel(.xlsx)</span>
+        </el-form-item>
+        <el-form-item label="流水文件">
           <el-upload
             ref="uploadRef"
             drag
             multiple
             :auto-upload="false"
             :limit="20"
-            accept=".pdf"
+            accept=".pdf,.xlsx"
             :disabled="uploading"
             :on-change="handleFileChange"
             :on-remove="handleFileRemove"
             :on-exceed="handleExceed"
           >
             <el-icon class="el-icon--upload"><upload-filled /></el-icon>
-            <div class="el-upload__text">将 PDF 拖到此处，或<em>点击选择</em></div>
+            <div class="el-upload__text">将 PDF / Excel 拖到此处，或<em>点击选择</em></div>
             <template #tip>
-              <div class="el-upload__tip">可一次选择多个 PDF（最多 20 个），系统自动判断原生 / 扫描件</div>
+              <div class="el-upload__tip">可一次选择多个文件（最多 20 个），支持 PDF 与 Excel(.xlsx)，系统自动判断原生 / 扫描件 / Excel 表头</div>
             </template>
           </el-upload>
         </el-form-item>
@@ -240,7 +244,7 @@ import {ElMessage, ElMessageBox} from 'element-plus';
 import {Download, Search, Share, Upload, UploadFilled, View, Plus, Edit, Delete, ArrowDown} from '@element-plus/icons-vue';
 import {
   createStatement, deleteStatement, updateStatement,
-  downloadSourceFile, importStatement, listShareUsers, listShares,
+  downloadImportTemplate, downloadSourceFile, importStatement, listShareUsers, listShares,
   listStatements, revokeShare, saveBlob, shareStatement
 } from '../api/bankStatement';
 import {useIsMobile} from '../composables/useIsMobile';
@@ -330,13 +334,25 @@ const uploadFiles = ref<any[]>([]);
 const uploadIndex = ref(0);
 const uploadTotal = ref(0);
 const uploadCurrentName = ref('');
+const templateDownloading = ref(false);
 
-const isPdfFile = (f: any) => (f.name || '').toLowerCase().endsWith('.pdf')
-  || f.raw?.type === 'application/pdf';
+const downloadTemplate = () => {
+  templateDownloading.value = true;
+  downloadImportTemplate()
+    .then((res: any) => saveBlob(res, '银行流水导入模板.xlsx'))
+    .finally(() => {
+      templateDownloading.value = false;
+    });
+};
+
+const isStatementFile = (f: any) => {
+  const name = (f.name || '').toLowerCase();
+  return name.endsWith('.pdf') || name.endsWith('.xlsx');
+};
 
 const handleFileChange = (file: any, files: any[]) => {
-  if (!isPdfFile(file)) {
-    ElMessage.error(`仅支持 PDF 文件：${file.name}`);
+  if (!isStatementFile(file)) {
+    ElMessage.error(`仅支持 PDF / Excel(.xlsx) 文件：${file.name}`);
     uploadRef.value?.handleRemove(file);
     return;
   }

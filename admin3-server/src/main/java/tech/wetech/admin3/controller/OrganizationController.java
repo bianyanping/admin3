@@ -47,9 +47,12 @@ public class OrganizationController {
 
   @RequiresPermissions("user:view")
   @GetMapping("/{organizationId}/users")
-  public ResponseEntity<PageDTO<OrgUserDTO>> findOrgUsers(Pageable pageable, @RequestParam(required = false) String username, @RequestParam(required = false) User.State state, @PathVariable Long organizationId) {
+  public ResponseEntity<PageDTO<OrgUserDTO>> findOrgUsers(Pageable pageable, @RequestParam(required = false) String username,
+                                                          @RequestParam(required = false) User.State state,
+                                                          @RequestParam(required = false) Boolean expired,
+                                                          @PathVariable Long organizationId) {
     Organization organization = organizationService.restrictToCurrentUserScope(organizationService.findOrganization(organizationId));
-    return ResponseEntity.ok(userService.findOrgUsers(pageable, username, state, organization));
+    return ResponseEntity.ok(userService.findOrgUsers(pageable, username, state, expired, organization));
   }
 
   @RequiresPermissions("organization:create")

@@ -15,8 +15,9 @@ import java.io.IOException;
 /**
  * 银行流水文件上传导入接口。
  *
- * <p>上传后自动判断 PDF 类型：
- * 有文本层的原生 PDF 走 PDFBox 解析，扫描件先走百度 OCR 再解析，最后统一入库。
+ * <p>支持 PDF 与 Excel(.xlsx)：
+ * PDF 自动判断原生文本层还是扫描件（扫描件先走百度 OCR）；
+ * Excel 自动识别表头行与列名，最终统一走同一套校验与入库逻辑。
  */
 @SecurityRequirement(name = "bearerAuth")
 @RestController
@@ -30,17 +31,17 @@ public class BankStatementImportController {
   }
 
   /**
-   * 上传 PDF 并解析入库。
+   * 上传流水文件（PDF / Excel）并解析入库。
    *
-   * @param file     银行流水 PDF
-   * @param bankCode 可选，银行编码（ICBC/PSBC/GXRCB/ABCHX/GLGMCZYH），不传则自动识别
-   * @param forceOcr 可选，true 时强制走 OCR（默认 false，自动判断）
+   * @param file     银行流水 PDF 或 Excel(.xlsx)
+   * @param bankCode 可选，银行编码（ICBC/PSBC/GXRCB/ABCHX/CCB/GLGMCZYH/GLYH/WECHAT），不传则自动识别
+   * @param forceOcr 可选，true 时强制走 OCR（仅 PDF 有效，默认 false 自动判断）
    */
   @PostMapping(path = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-  public ResponseEntity<StatementImportService.ImportResult> importPdf(
+  public ResponseEntity<StatementImportService.ImportResult> importStatement(
     @RequestParam("file") MultipartFile file,
     @RequestParam(value = "bankCode", required = false) String bankCode,
     @RequestParam(value = "forceOcr", defaultValue = "false") boolean forceOcr) throws IOException {
-    return ResponseEntity.ok(statementImportService.importPdf(file, bankCode, forceOcr));
+    return ResponseEntity.ok(statementImportService.importStatement(file, bankCode, forceOcr));
   }
 }

@@ -9,8 +9,12 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import tech.wetech.admin3.sys.model.User;
 import tech.wetech.admin3.sys.service.SessionService;
+import tech.wetech.admin3.sys.service.UserService;
 import tech.wetech.admin3.sys.service.dto.UserinfoDTO;
+
+import java.time.LocalDateTime;
 
 /**
  * @author cjbi
@@ -19,14 +23,25 @@ import tech.wetech.admin3.sys.service.dto.UserinfoDTO;
 public class LoginController {
 
   private final SessionService sessionService;
+  private final UserService userService;
 
-  public LoginController(SessionService sessionService) {
+  public LoginController(SessionService sessionService, UserService userService) {
     this.sessionService = sessionService;
+    this.userService = userService;
   }
 
   @PostMapping("/login")
   private ResponseEntity<UserinfoDTO> login(@RequestBody @Valid LoginRequest request) {
     return ResponseEntity.ok(sessionService.login(request.username(), request.password()));
+  }
+
+  /**
+   * 用户自助注册：归属「测试账号」组织并授予「普通用户」角色，账号有效期为 1 天
+   */
+  @PostMapping("/register")
+  public ResponseEntity<RegisterResult> register(@RequestBody @Valid RegisterRequest request) {
+    User user = userService.register(request.username(), request.password());
+    return ResponseEntity.ok(new RegisterResult(user.getUsername(), user.getExpireTime(), UserService.REGISTER_VALID_DAYS));
   }
 
   @SecurityRequirement(name = "bearerAuth")
@@ -47,5 +62,10 @@ public class LoginController {
   record LoginRequest(@NotBlank String username, @NotBlank String password) {
   }
 
+  record RegisterRequest(@NotBlank String username, @NotBlank String password) {
+  }
+
+  public record RegisterResult(String username, LocalDateTime expireTime, int validDays) {
+  }
 
 }

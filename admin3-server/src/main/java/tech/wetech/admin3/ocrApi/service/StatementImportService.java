@@ -24,6 +24,7 @@ import tech.wetech.admin3.ocrApi.BaiduOcr;
 import tech.wetech.admin3.ocrApi.model.BankStatement;
 import tech.wetech.admin3.ocrApi.parser.AbcHxNativePdfParser;
 import tech.wetech.admin3.ocrApi.parser.CcbNativePdfParser;
+import tech.wetech.admin3.ocrApi.parser.ExcelStatementParser;
 import tech.wetech.admin3.ocrApi.parser.IcbcNativePdfParser;
 import tech.wetech.admin3.ocrApi.parser.IcbcOcrStatementParser;
 import tech.wetech.admin3.ocrApi.parser.GlBankNativePdfParser;
@@ -79,6 +80,18 @@ public class StatementImportService {
 
   private static final Pattern DATE = Pattern.compile("\\d{4}[-年]\\d{1,2}[-月]\\d{1,2}");
 
+  /** 银行编码 → 展示名称（Excel 表头未写银行全称时补全） */
+  private static final Map<String, String> BANK_NAMES = Map.of(
+    "ICBC", "中国工商银行",
+    "PSBC", "中国邮政储蓄银行",
+    "GXRCB", "广西农商联合银行",
+    "ABCHX", "中国农业银行",
+    "CCB", "中国建设银行",
+    "GLGMCZYH", "桂林国民村镇银行",
+    "GLYH", "桂林银行",
+    "WECHAT", "微信支付"
+  );
+
   /** 银行关键字 → 银行编码（顺序敏感：先具体后泛指） */
   private static final Map<String, String> BANK_KEYWORDS = new LinkedHashMap<>();
 
@@ -126,19 +139,25 @@ public class StatementImportService {
   }
 
   /**
-   * 解析上传的 PDF 并入库。
+   * 解析上传的流水文件并入库。
    *
-   * @param file       上传的 PDF
+   * @param file       上传的 PDF 或 Excel(.xlsx)
    * @param bankCode   银行编码（可选，传了就不再自动识别）
-   * @param forceOcr   true=强制走 OCR（原生 PDF 也可强制）
+   * @param forceOcr   true=强制走 OCR（仅 PDF 有效）
    */
-  public ImportResult importPdf(MultipartFile file, String bankCode, boolean forceOcr) throws IOException {
+  public ImportResult importStatement(MultipartFile file, String bankCode, boolean forceOcr) throws IOException {
     if (file == null || file.isEmpty()) {
       throw new BusinessException(CommonResultStatus.PARAM_ERROR, "上传文件为空");
     }
     String fileName = file.getOriginalFilename();
-    if (fileName == null || !fileName.toLowerCase(Locale.ROOT).endsWith(".pdf")) {
-      throw new BusinessException(CommonResultStatus.PARAM_ERROR, "仅支持 PDF 文件，当前文件：" + fileName);
+    String lowerName = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
+    boolean excel = lowerName.endsWith(".xlsx");
+    if (!excel && !lowerName.endsWith(".pdf")) {
+      throw new BusinessException(CommonResultStatus.PARAM_ERROR,
+        "仅支持 PDF 或 Excel(.xlsx) 文件，当前文件：" + fileName);
+    }
+    if (excel) {
+      return importExcel(file, bankCode);
     }
     byte[] pdfBytes = file.getBytes();
 
@@ -187,6 +206,44 @@ public class StatementImportService {
       log.info("上传文件 {} 判定为原生 PDF，银行={}", fileName, code);
     }
 
+    return persist(mode, code, dto, pdfBytes, file);
+  }
+
+  /**
+   * 解析上传的 Excel(.xlsx) 流水并入库：
+   * 自动识别表头，表头信息区的户名/账号/账期沿用与 PDF 相同的校验规则。
+   */
+  private ImportResult importExcel(MultipartFile file, String bankCode) throws IOException {
+    String fileName = file.getOriginalFilename();
+    byte[] bytes = file.getBytes();
+    File tmp = Files.createTempFile("statement-", ".xlsx").toFile();
+    BankStatementDTO dto;
+    try {
+      Files.write(tmp.toPath(), bytes);
+      dto = ExcelStatementParser.parse(tmp, fileName);
+    } finally {
+      Files.deleteIfExists(tmp.toPath());
+    }
+
+    String code = detectBankCode(bankCode, dto.getRawOcrText(), fileName);
+    if (code == null) {
+      throw new BusinessException(CommonResultStatus.FAIL,
+        "未能从 Excel 中识别银行名称，请在上传时手动选择银行（ICBC/PSBC/GXRCB/ABCHX/CCB/GLGMCZYH/GLYH/WECHAT）");
+    }
+    StatementHeader header = dto.getHeader();
+    if (header.getBankName() == null || header.getBankName().isBlank()) {
+      header.setBankName(BANK_NAMES.getOrDefault(code, code));
+    }
+    log.info("上传文件 {} 为 Excel，银行={}", fileName, code);
+    return persist("EXCEL", code, dto, bytes, file);
+  }
+
+  /**
+   * 校验并入库，PDF 与 Excel 共用，保证两条链路的判重、合并、校验口径一致。
+   */
+  private ImportResult persist(String mode, String code, BankStatementDTO dto,
+                               byte[] fileBytes, MultipartFile file) {
+    String fileName = file.getOriginalFilename();
     // 户名、账号是流水单的必备标识，识别不到直接拒绝入库
     StatementHeader header = dto.getHeader();
     String accountNo = header == null ? null : header.getAccountNo();
@@ -199,7 +256,7 @@ public class StatementImportService {
         "未能识别到" + missing + "，请到后台维护户名账号信息后重新上传");
     }
 
-    List<tech.wetech.admin3.DTO.TransactionDTO> transactions = dto.getTransactions();
+    List<TransactionDTO> transactions = dto.getTransactions();
     if (transactions == null || transactions.isEmpty()) {
       throw new BusinessException(CommonResultStatus.FAIL,
         "未解析到任何交易明细，请确认文件版式，或尝试 forceOcr=true 强制 OCR");
@@ -214,7 +271,7 @@ public class StatementImportService {
     String sourceKey = null;
     if (!duplicated && !merged) {
       StorageFileDTO stored = storageService.store(
-        null, new java.io.ByteArrayInputStream(pdfBytes), file.getSize(), file.getContentType(), fileName);
+        null, new java.io.ByteArrayInputStream(fileBytes), file.getSize(), file.getContentType(), fileName);
       sourceKey = stored.getKey();
     }
     Long orgId = null;

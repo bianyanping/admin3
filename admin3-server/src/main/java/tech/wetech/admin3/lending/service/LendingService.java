@@ -1,13 +1,20 @@
 package tech.wetech.admin3.lending.service;
 
 import jakarta.persistence.criteria.Predicate;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import tech.wetech.admin3.common.BusinessException;
 import tech.wetech.admin3.common.CommonResultStatus;
 import tech.wetech.admin3.common.scope.OrgScopeService;
@@ -34,6 +41,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 
 /**
  * 网贷识别与统计服务。
@@ -108,19 +118,28 @@ public class LendingService {
   private final tech.wetech.admin3.risk.repository.RiskCounterpartyRepository riskCounterpartyRepository;
   /** 已按组织完成懒初始化的组织，避免每次请求重复检查 */
   private final Set<Long> initializedOrgs = java.util.concurrent.ConcurrentHashMap.newKeySet();
+  /** 按组织串行化初始化/重建，避免同组织并发 delete+insert 造成死锁 */
+  private final ConcurrentHashMap<Long, ReentrantLock> orgLocks = new ConcurrentHashMap<>();
+  /** 单组织初始化/重建的独立事务，避免与页面读取事务相互持锁 */
+  private final TransactionTemplate transactionTemplate;
+  private final JdbcTemplate jdbcTemplate;
 
   public LendingService(LendingPlatformRepository platformRepository,
                         LendingTransactionMatchRepository matchRepository,
                         BankStatementTransactionRepository transactionRepository,
                         BankStatementRepository statementRepository,
                         OrgScopeService orgScope,
-                        tech.wetech.admin3.risk.repository.RiskCounterpartyRepository riskCounterpartyRepository) {
+                        tech.wetech.admin3.risk.repository.RiskCounterpartyRepository riskCounterpartyRepository,
+                        PlatformTransactionManager transactionManager,
+                        JdbcTemplate jdbcTemplate) {
     this.platformRepository = platformRepository;
     this.matchRepository = matchRepository;
     this.transactionRepository = transactionRepository;
     this.statementRepository = statementRepository;
     this.orgScope = orgScope;
     this.riskCounterpartyRepository = riskCounterpartyRepository;
+    this.transactionTemplate = new TransactionTemplate(transactionManager);
+    this.jdbcTemplate = jdbcTemplate;
   }
 
   // ==================== 关键词库维护 ====================
@@ -225,9 +244,12 @@ public class LendingService {
   /**
    * 一键初始化预置平台：仅作用于当前组织，按名称判重，已存在则跳过；内置兜底平台只补一次。
    */
-  @Transactional
   public InitResult initPresets(Long userId) {
     Long orgId = requireDataOrgId(userId);
+    return executeWithRetry(() -> withOrgLock(orgId, () -> doInitPresets(orgId)));
+  }
+
+  private InitResult doInitPresets(Long orgId) {
     int inserted = 0;
     int skipped = 0;
     if (ensureBuiltinPlatform(orgId)) {
@@ -247,8 +269,13 @@ public class LendingService {
       platform.setEnabled(Boolean.TRUE);
       platform.setBuiltin(Boolean.FALSE);
       platform.setRemark(preset.remark());
-      platformRepository.save(platform);
-      inserted++;
+      try {
+        platformRepository.save(platform);
+        inserted++;
+      } catch (DataIntegrityViolationException e) {
+        // 并发初始化时另一请求已插入同名平台，按已存在处理
+        skipped++;
+      }
     }
     return new InitResult(inserted, skipped, platformRepository.countByOrgId(orgId));
   }
@@ -276,8 +303,13 @@ public class LendingService {
         platform.setEnabled(Boolean.TRUE);
         platform.setBuiltin(Boolean.TRUE);
         platform.setRemark("系统内置兜底项：正式平台都未命中时才参与匹配，可修改关键词或停用");
-        platformRepository.save(platform);
-        return true;
+        try {
+          platformRepository.save(platform);
+          return true;
+        } catch (DataIntegrityViolationException e) {
+          // 并发首次访问时另一请求已创建，视为已存在
+          return false;
+        }
       });
   }
 
@@ -286,10 +318,18 @@ public class LendingService {
   /**
    * 重建当前组织的命中记录：清空本组织数据后按本组织关键词库重新匹配本组织子树流水。
    * 只读流水表，不修改任何流水数据。
+   *
+   * <p>同一组织的初始化/重建通过 JVM 锁 + MySQL 命名锁串行化，重建在独立事务中完成，
+   * 避免并发页面请求同时 delete+insert 造成死锁或唯一键冲突。
    */
-  @Transactional
   public RefreshResult refreshMatches(Long userId) {
     Long orgId = requireDataOrgId(userId);
+    RefreshResult result = executeWithRetry(() -> withOrgLock(orgId, () -> doRefreshMatches(orgId)));
+    initializedOrgs.add(orgId);
+    return result;
+  }
+
+  private RefreshResult doRefreshMatches(Long orgId) {
     long started = System.currentTimeMillis();
     List<LendingPlatform> platforms = platformRepository.findByEnabledTrueAndOrgIdOrderByIdAsc(orgId);
     List<Rule> formalRules = buildRules(platforms, false);
@@ -352,7 +392,6 @@ public class LendingService {
       matchRepository.saveAll(matches.subList(i, Math.min(i + 500, matches.size())));
     }
 
-    initializedOrgs.add(orgId);
     long elapsed = System.currentTimeMillis() - started;
     long matchedPlatforms = matches.stream().map(LendingTransactionMatch::getPlatformId).distinct().count();
     return new RefreshResult(sources.size(), matches.size(), income, expense, other,
@@ -361,22 +400,97 @@ public class LendingService {
 
   /**
    * 组织首次访问时懒初始化：补齐内置兜底平台，并在命中记录缺失/过期时按当前组织重建。
+   * 重建走独立事务；同一组织并发首次访问时只有一个请求真正执行重建。
    */
   private void ensureOrgReady(Long userId) {
     Long orgId = orgScope.dataOrgId(userId);
-    if (orgId == null) {
+    if (orgId == null || initializedOrgs.contains(orgId)) {
       return;
     }
-    ensureBuiltinPlatform(orgId);
-    if (initializedOrgs.contains(orgId)) {
-      return;
+    executeWithRetry(() -> {
+      withOrgLock(orgId, () -> {
+        if (initializedOrgs.contains(orgId)) {
+          return null;
+        }
+        ensureBuiltinPlatform(orgId);
+        long stale = matchRepository.countStaleMatchesByOrgId(orgId);
+        boolean empty = matchRepository.countByOrgId(orgId) == 0;
+        if (stale > 0 || (empty && hasLendingSources(orgId))) {
+          doRefreshMatches(orgId);
+        }
+        return null;
+      });
+      initializedOrgs.add(orgId);
+      return null;
+    });
+  }
+
+  /**
+   * 同组织串行化锁：JVM 内 ReentrantLock 避免本实例并发，
+   * MySQL GET_LOCK 兼容多实例同时首次访问。
+   *
+   * <p>命名锁在同一个事务连接上获取，并在事务提交/回滚后释放，
+   * 避免锁释放早于提交导致其他请求读到中间状态。
+   */
+  private <T> T withOrgLock(Long orgId, Supplier<T> action) {
+    ReentrantLock localLock = orgLocks.computeIfAbsent(orgId, key -> new ReentrantLock());
+    localLock.lock();
+    try {
+      return transactionTemplate.execute(status -> {
+        String lockName = "lending:refresh:org:" + orgId;
+        if (!acquireDbLock(lockName, 60)) {
+          throw new BusinessException(CommonResultStatus.FAIL, "网贷数据正在初始化，请稍后重试");
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+          @Override
+          public void afterCompletion(int status) {
+            releaseDbLock(lockName);
+          }
+        });
+        return action.get();
+      });
+    } finally {
+      localLock.unlock();
     }
-    long stale = matchRepository.countStaleMatchesByOrgId(orgId);
-    boolean empty = matchRepository.countByOrgId(orgId) == 0;
-    if (stale > 0 || (empty && hasLendingSources(orgId))) {
-      refreshMatches(userId);
+  }
+
+  private boolean acquireDbLock(String lockName, int timeoutSeconds) {
+    Integer acquired = jdbcTemplate.queryForObject(
+      "SELECT GET_LOCK(?, ?)", Integer.class, lockName, timeoutSeconds);
+    return acquired != null && acquired == 1;
+  }
+
+  private void releaseDbLock(String lockName) {
+    try {
+      jdbcTemplate.queryForObject("SELECT RELEASE_LOCK(?)", Integer.class, lockName);
+    } catch (RuntimeException ignored) {
+      // 连接关闭时 MySQL 会自动释放命名锁
     }
-    initializedOrgs.add(orgId);
+  }
+
+  /**
+   * 极端情况下不同组织并发重建仍可能出现 InnoDB 死锁，做少量重试；
+   * 每次重试都处于同一组织锁内，重建结果保持幂等。
+   */
+  private <T> T executeWithRetry(Supplier<T> action) {
+    PessimisticLockingFailureException last = null;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      try {
+        return action.get();
+      } catch (PessimisticLockingFailureException e) {
+        last = e;
+        try {
+          Thread.sleep(50L * attempt);
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          break;
+        }
+      }
+    }
+    if (last != null) {
+      throw last;
+    }
+    throw new BusinessException(CommonResultStatus.FAIL, "网贷数据初始化失败，请稍后重试");
   }
 
   private boolean hasLendingSources(Long orgId) {
@@ -386,7 +500,6 @@ public class LendingService {
 
   // ==================== 月度统计 ====================
 
-  @Transactional
   public MonthlyStats monthlyStats(Long userId, String startMonth, String endMonth, String accountHolder) {
     YearMonth start = parseMonth(startMonth, "开始月份");
     YearMonth end = parseMonth(endMonth, "结束月份");
@@ -458,7 +571,6 @@ public class LendingService {
 
   // ==================== 明细 ====================
 
-  @Transactional
   public Page<LendingTransactionMatch> transactions(Long userId, String month, Long platformId,
                                                     String direction, String accountHolder,
                                                     int page, int size) {

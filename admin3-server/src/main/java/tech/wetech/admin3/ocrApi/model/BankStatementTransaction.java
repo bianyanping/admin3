@@ -19,7 +19,11 @@ import java.time.LocalDateTime;
 @Setter
 @Table(name = "bank_statement_transaction", indexes = {
   @Index(name = "idx_bank_statement_tx_statement", columnList = "statement_id"),
-  @Index(name = "idx_bank_statement_tx_date", columnList = "transDate")
+  @Index(name = "idx_bank_statement_tx_date", columnList = "transDate"),
+  // 分析/看板：按流水单 + 日期区间过滤
+  @Index(name = "idx_bank_statement_tx_statement_date", columnList = "statement_id,transDate"),
+  // 明细列表：按流水单排序分页、导出
+  @Index(name = "idx_bank_statement_tx_statement_seq", columnList = "statement_id,seqNo")
 })
 @Comment("银行流水交易明细：一份对账单下的逐笔交易记录")
 public class BankStatementTransaction extends BaseEntity {

@@ -7,10 +7,10 @@ import org.springframework.transaction.annotation.Transactional;
 import tech.wetech.admin3.keyword.model.KeywordGroup;
 import tech.wetech.admin3.keyword.repository.KeywordGroupRepository;
 import tech.wetech.admin3.ocrApi.model.BankStatement;
-import tech.wetech.admin3.ocrApi.model.BankStatementTransaction;
 import tech.wetech.admin3.ocrApi.repository.BankStatementRepository;
-import tech.wetech.admin3.ocrApi.repository.BankStatementTransactionRepository;
 import tech.wetech.admin3.ocrApi.service.BankStatementScopeService;
+import tech.wetech.admin3.ocrApi.service.TransactionLiteQueryService;
+import tech.wetech.admin3.ocrApi.service.TransactionLiteQueryService.TxnLite;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -39,16 +39,16 @@ public class KeywordAnalysisService {
 
   private final KeywordGroupRepository groupRepository;
   private final BankStatementRepository statementRepository;
-  private final BankStatementTransactionRepository transactionRepository;
+  private final TransactionLiteQueryService transactionLiteQueryService;
   private final BankStatementScopeService scopeService;
 
   public KeywordAnalysisService(KeywordGroupRepository groupRepository,
                                 BankStatementRepository statementRepository,
-                                BankStatementTransactionRepository transactionRepository,
+                                TransactionLiteQueryService transactionLiteQueryService,
                                 BankStatementScopeService scopeService) {
     this.groupRepository = groupRepository;
     this.statementRepository = statementRepository;
-    this.transactionRepository = transactionRepository;
+    this.transactionLiteQueryService = transactionLiteQueryService;
     this.scopeService = scopeService;
   }
 
@@ -185,12 +185,10 @@ public class KeywordAnalysisService {
       statementById.put(s.getId(), s);
     }
     List<Long> ids = statements.stream().map(BankStatement::getId).toList();
-    Specification<BankStatementTransaction> spec = (root, query, cb) ->
-      root.get("statement").get("id").in(ids);
-    List<BankStatementTransaction> txns = transactionRepository.findAll(spec);
+    List<TxnLite> txns = transactionLiteQueryService.findByStatementIds(ids);
 
     int totalScanned = 0;
-    for (BankStatementTransaction t : txns) {
+    for (TxnLite t : txns) {
       if (isFlow(t)) {
         totalScanned++;
       }
@@ -203,7 +201,7 @@ public class KeywordAnalysisService {
     return new AnalysisResult(holderFilter, totalScanned, results);
   }
 
-  private GroupResult analyzeGroup(KeywordGroup group, List<BankStatementTransaction> txns,
+  private GroupResult analyzeGroup(KeywordGroup group, List<TxnLite> txns,
                                    Map<Long, BankStatement> statementById, int totalScanned) {
     List<String> keywordList = split(group.getKeywords());
     Set<String> fields = Set.copyOf(split(group.getFields()));
@@ -217,11 +215,11 @@ public class KeywordAnalysisService {
     }
     Map<YearMonth, MonthAcc> months = new TreeMap<>();
 
-    for (BankStatementTransaction t : txns) {
+    for (TxnLite t : txns) {
       if (!isFlow(t)) {
         continue;
       }
-      boolean income = "入".equals(t.getDirection());
+      boolean income = "入".equals(t.direction());
       if (income && !allowIncome) {
         continue;
       }
@@ -232,11 +230,11 @@ public class KeywordAnalysisService {
       if (matched.isEmpty()) {
         continue;
       }
-      BankStatement statement = statementById.get(t.getStatement().getId());
-      BigDecimal amount = t.getAmount() == null ? BigDecimal.ZERO : t.getAmount().abs();
+      BankStatement statement = statementById.get(t.statementId());
+      BigDecimal amount = t.amount() == null ? BigDecimal.ZERO : t.amount().abs();
       BigDecimal signed = income ? amount : amount.negate();
-      details.add(new TxnRow(t.getId(), statement == null ? null : statement.getId(), t.getTransDate(),
-        t.getDirection(), signed, t.getCounterpartyName(), t.getSummary(), t.getRemark(),
+      details.add(new TxnRow(t.id(), statement == null ? null : statement.getId(), t.transDate(),
+        t.direction(), signed, t.counterpartyName(), t.summary(), t.remark(),
         statement == null ? null : statement.getBankName(),
         statement == null ? null : statement.getAccountNo(),
         statement == null ? null : statement.getAccountHolder(), matched));
@@ -248,8 +246,8 @@ public class KeywordAnalysisService {
           stat.amount = stat.amount.add(amount);
         }
       }
-      if (income && t.getTransDate() != null) {
-        YearMonth month = YearMonth.from(t.getTransDate());
+      if (income && t.transDate() != null) {
+        YearMonth month = YearMonth.from(t.transDate());
         MonthAcc acc = months.computeIfAbsent(month, m -> new MonthAcc());
         acc.count++;
         acc.amount = acc.amount.add(amount);
@@ -294,13 +292,13 @@ public class KeywordAnalysisService {
       keywordList, group.getDirection(), details.size(), hitRate, hitAmount, stats, details, monthRows);
   }
 
-  private List<String> matchKeywords(BankStatementTransaction t, List<String> keywords, Set<String> fields) {
+  private List<String> matchKeywords(TxnLite t, List<String> keywords, Set<String> fields) {
     StringBuilder haystack = new StringBuilder();
-    if (fields.contains("remark") && t.getRemark() != null) {
-      haystack.append(t.getRemark().toLowerCase(Locale.ROOT)).append('\u0001');
+    if (fields.contains("remark") && t.remark() != null) {
+      haystack.append(t.remark().toLowerCase(Locale.ROOT)).append('\u0001');
     }
-    if (fields.contains("summary") && t.getSummary() != null) {
-      haystack.append(t.getSummary().toLowerCase(Locale.ROOT)).append('\u0001');
+    if (fields.contains("summary") && t.summary() != null) {
+      haystack.append(t.summary().toLowerCase(Locale.ROOT)).append('\u0001');
     }
     if (haystack.isEmpty()) {
       return List.of();
@@ -329,8 +327,8 @@ public class KeywordAnalysisService {
     return items;
   }
 
-  private static boolean isFlow(BankStatementTransaction t) {
-    return "入".equals(t.getDirection()) || "出".equals(t.getDirection());
+  private static boolean isFlow(TxnLite t) {
+    return "入".equals(t.direction()) || "出".equals(t.direction());
   }
 
   private List<BankStatement> visibleStatements(Long userId) {

@@ -30,6 +30,8 @@ import tech.wetech.admin3.ocrApi.repository.BankStatementRepository;
 import tech.wetech.admin3.ocrApi.repository.BankStatementShareRepository;
 import tech.wetech.admin3.ocrApi.repository.BankStatementTransactionRepository;
 import tech.wetech.admin3.ocrApi.service.BankStatementScopeService;
+import tech.wetech.admin3.ocrApi.service.TransactionLiteQueryService;
+import tech.wetech.admin3.ocrApi.service.TransactionLiteQueryService.TxnLite;
 import tech.wetech.admin3.risk.model.RiskTag;
 import tech.wetech.admin3.risk.service.RiskAlertService;
 import tech.wetech.admin3.risk.service.RiskDatabaseService;
@@ -76,6 +78,7 @@ public class BankStatementController {
   private final RiskDatabaseService riskDatabaseService;
   private final RiskAlertService riskAlertService;
   private final OrgScopeService orgScope;
+  private final TransactionLiteQueryService transactionLiteQueryService;
 
   public BankStatementController(BankStatementRepository bankStatementRepository,
                                  BankStatementTransactionRepository transactionRepository,
@@ -85,7 +88,8 @@ public class BankStatementController {
                                  UserRepository userRepository,
                                  RiskDatabaseService riskDatabaseService,
                                  RiskAlertService riskAlertService,
-                                 OrgScopeService orgScope) {
+                                 OrgScopeService orgScope,
+                                 TransactionLiteQueryService transactionLiteQueryService) {
     this.bankStatementRepository = bankStatementRepository;
     this.transactionRepository = transactionRepository;
     this.storageService = storageService;
@@ -95,6 +99,7 @@ public class BankStatementController {
     this.riskDatabaseService = riskDatabaseService;
     this.riskAlertService = riskAlertService;
     this.orgScope = orgScope;
+    this.transactionLiteQueryService = transactionLiteQueryService;
   }
 
   private Long currentUserId() {
@@ -255,19 +260,16 @@ public class BankStatementController {
       .distinct()
       .sorted()
       .toList();
-    List<BankStatementTransaction> txns = new ArrayList<>();
+    List<TxnLite> txns = new ArrayList<>();
     if (!statementIds.isEmpty()) {
-      Specification<BankStatementTransaction> spec = (root, query, cb) -> {
-        List<Predicate> predicates = new ArrayList<>();
-        predicates.add(root.get("statement").get("id").in(statementIds));
-        predicates.add(cb.greaterThanOrEqualTo(root.get("transDate"), from));
-        predicates.add(cb.lessThanOrEqualTo(root.get("transDate"), to));
-        if (accountHolder != null && !accountHolder.isBlank()) {
-          predicates.add(cb.equal(root.get("statement").get("accountHolder"), accountHolder));
-        }
-        return cb.and(predicates.toArray(new Predicate[0]));
-      };
-      txns = transactionRepository.findAll(spec);
+      List<Long> filteredIds = statementIds;
+      if (accountHolder != null && !accountHolder.isBlank()) {
+        filteredIds = scopedStatements.stream()
+          .filter(s -> accountHolder.equals(s.getAccountHolder()))
+          .map(BankStatement::getId)
+          .toList();
+      }
+      txns = transactionLiteQueryService.findByStatementIdsAndDateRange(filteredIds, from, to);
     }
 
     BigDecimal totalIncome = BigDecimal.ZERO;
@@ -277,12 +279,12 @@ public class BankStatementController {
     Map<LocalDate, BigDecimal[]> daily = new TreeMap<>();
     Map<String, BigDecimal> byCategory = new HashMap<>();
     Map<String, BigDecimal> byCounterparty = new HashMap<>();
-    List<BankStatementTransaction> large = new ArrayList<>();
+    List<TxnLite> large = new ArrayList<>();
 
-    for (BankStatementTransaction t : txns) {
-      BigDecimal amount = t.getAmount() == null ? BigDecimal.ZERO : t.getAmount();
+    for (TxnLite t : txns) {
+      BigDecimal amount = t.amount() == null ? BigDecimal.ZERO : t.amount();
       // 微信「其他」类（零钱充值/提现等）不计收支
-      boolean internal = "其他".equals(t.getDirection());
+      boolean internal = "其他".equals(t.direction());
       if (!internal) {
         if (amount.signum() >= 0) {
           totalIncome = totalIncome.add(amount);
@@ -290,15 +292,15 @@ public class BankStatementController {
           totalExpense = totalExpense.add(amount.abs());
         }
       }
-      if (to.equals(t.getTransDate())) {
+      if (to.equals(t.transDate())) {
         todayCount++;
       }
       if (amount.abs().compareTo(ANOMALY_THRESHOLD) >= 0) {
         anomalyCount++;
         large.add(t);
       }
-      if (t.getTransDate() != null && !internal) {
-        BigDecimal[] bucket = daily.computeIfAbsent(t.getTransDate(),
+      if (t.transDate() != null && !internal) {
+        BigDecimal[] bucket = daily.computeIfAbsent(t.transDate(),
           k -> new BigDecimal[]{BigDecimal.ZERO, BigDecimal.ZERO});
         if (amount.signum() >= 0) {
           bucket[0] = bucket[0].add(amount);
@@ -306,9 +308,9 @@ public class BankStatementController {
           bucket[1] = bucket[1].add(amount.abs());
         }
       }
-      byCategory.merge(classifySummary(t.getSummary()), amount.abs(), BigDecimal::add);
-      if (t.getCounterpartyName() != null && !t.getCounterpartyName().isBlank()) {
-        byCounterparty.merge(t.getCounterpartyName().trim(), amount.abs(), BigDecimal::add);
+      byCategory.merge(classifySummary(t.summary()), amount.abs(), BigDecimal::add);
+      if (t.counterpartyName() != null && !t.counterpartyName().isBlank()) {
+        byCounterparty.merge(t.counterpartyName().trim(), amount.abs(), BigDecimal::add);
       }
     }
 
@@ -339,12 +341,11 @@ public class BankStatementController {
 
     // 最近大额流水（按日期倒序取 10 条）
     List<LargeItem> recentLarge = large.stream()
-      .sorted(Comparator.comparing(BankStatementTransaction::getTransDate,
+      .sorted(Comparator.comparing(TxnLite::transDate,
         Comparator.nullsLast(Comparator.reverseOrder())))
       .limit(10)
-      .map(t -> new LargeItem(t.getId(),
-        t.getStatement() == null ? null : t.getStatement().getId(),
-        t.getTransDate(), t.getAmount(), t.getCounterpartyName(), t.getSummary()))
+      .map(t -> new LargeItem(t.id(), t.statementId(),
+        t.transDate(), t.amount(), t.counterpartyName(), t.summary()))
       .toList();
 
     return ResponseEntity.ok(new DashboardStats(
@@ -404,13 +405,11 @@ public class BankStatementController {
     }
 
     List<Long> ids = statements.stream().map(BankStatement::getId).toList();
-    Specification<BankStatementTransaction> txSpec = (root, query, cb) ->
-      root.get("statement").get("id").in(ids);
-    List<BankStatementTransaction> txns = transactionRepository.findAll(txSpec);
+    List<TxnLite> txns = transactionLiteQueryService.findByStatementIds(ids);
 
-    Map<Long, List<BankStatementTransaction>> txnsByStatement = new HashMap<>();
-    for (BankStatementTransaction t : txns) {
-      txnsByStatement.computeIfAbsent(t.getStatement().getId(), k -> new ArrayList<>()).add(t);
+    Map<Long, List<TxnLite>> txnsByStatement = new HashMap<>();
+    for (TxnLite t : txns) {
+      txnsByStatement.computeIfAbsent(t.statementId(), k -> new ArrayList<>()).add(t);
     }
     // 同账号上一份流水单期末余额：账期首尾相接时用于承接期初，避免账期起始到首笔交易的空档被丢弃
     Map<Long, CarryIn> carryIns = buildCarryIns(statements, txnsByStatement);
@@ -419,15 +418,15 @@ public class BankStatementController {
     BigDecimal totalExpense = BigDecimal.ZERO;
     TreeMap<YearMonth, BigDecimal[]> monthly = new TreeMap<>();
     Map<YearMonth, Long> monthlyCount = new HashMap<>();
-    for (BankStatementTransaction t : txns) {
-      BigDecimal amount = nz(t.getAmount());
-      boolean internal = "其他".equals(t.getDirection());
+    for (TxnLite t : txns) {
+      BigDecimal amount = nz(t.amount());
+      boolean internal = "其他".equals(t.direction());
       BigDecimal income = internal || amount.signum() < 0 ? BigDecimal.ZERO : amount;
       BigDecimal expense = internal || amount.signum() >= 0 ? BigDecimal.ZERO : amount.abs();
       totalIncome = totalIncome.add(income);
       totalExpense = totalExpense.add(expense);
-      if (t.getTransDate() != null) {
-        YearMonth month = YearMonth.from(t.getTransDate());
+      if (t.transDate() != null) {
+        YearMonth month = YearMonth.from(t.transDate());
         BigDecimal[] bucket = monthly.computeIfAbsent(month,
           k -> new BigDecimal[]{BigDecimal.ZERO, BigDecimal.ZERO});
         bucket[0] = bucket[0].add(income);
@@ -512,9 +511,7 @@ public class BankStatementController {
     }
 
     List<Long> scopedIds = statements.stream().map(BankStatement::getId).toList();
-    Specification<BankStatementTransaction> txSpec = (root, query, cb) ->
-      root.get("statement").get("id").in(scopedIds);
-    List<BankStatementTransaction> txns = transactionRepository.findAll(txSpec);
+    List<TxnLite> txns = transactionLiteQueryService.findByStatementIds(scopedIds);
 
     Map<String, CpAgg> groups = new HashMap<>();
     // 消费型大众对手（抖音/美团/微信转账等）不作为可打标的正常对手展示
@@ -526,8 +523,8 @@ public class BankStatementController {
     long selfTransferCount = 0;
     BigDecimal selfTransferAmount = BigDecimal.ZERO;
 
-    for (BankStatementTransaction t : txns) {
-      String key = normalizeCounterpartyName(t.getCounterpartyName());
+    for (TxnLite t : txns) {
+      String key = normalizeCounterpartyName(t.counterpartyName());
       if (key.isEmpty()) {
         excludedBlank++;
         continue;
@@ -535,18 +532,18 @@ public class BankStatementController {
       if (consumerKeys.contains(key)) {
         continue;
       }
-      String direction = t.getDirection();
+      String direction = t.direction();
       if (!"入".equals(direction) && !"出".equals(direction)) {
         continue;
       }
-      BankStatement statement = statementById.get(t.getStatement().getId());
+      BankStatement statement = statementById.get(t.statementId());
       String ownHolder = statement == null ? "" : normalizeCounterpartyName(statement.getAccountHolder());
       boolean self = isSelfTransfer(t, key, ownHolder, accountOwner);
-      BigDecimal amount = nz(t.getAmount()).abs();
+      BigDecimal amount = nz(t.amount()).abs();
 
       CpAgg agg = groups.computeIfAbsent(key, k -> new CpAgg());
       if (agg.displayName == null) {
-        agg.displayName = displayCounterpartyName(t.getCounterpartyName());
+        agg.displayName = displayCounterpartyName(t.counterpartyName());
       }
       totalTxn++;
       if ("入".equals(direction)) {
@@ -565,8 +562,8 @@ public class BankStatementController {
           agg.holders.add(statement.getAccountHolder().trim());
         }
       }
-      if (t.getTransDate() != null && (agg.lastDate == null || t.getTransDate().isAfter(agg.lastDate))) {
-        agg.lastDate = t.getTransDate();
+      if (t.transDate() != null && (agg.lastDate == null || t.transDate().isAfter(agg.lastDate))) {
+        agg.lastDate = t.transDate();
       }
       if (self) {
         agg.selfCount++;
@@ -654,9 +651,7 @@ public class BankStatementController {
       }
     }
 
-    Specification<BankStatementTransaction> txSpec = (root, query, cb) ->
-      root.get("statement").get("id").in(visibleIds);
-    List<BankStatementTransaction> txns = transactionRepository.findAll(txSpec);
+    List<TxnLite> txns = transactionLiteQueryService.findByStatementIds(visibleIds);
 
     String holderFilter = accountHolder == null ? "" : normalizeCounterpartyName(accountHolder);
     String accountFilter = digitsOnly(accountNo);
@@ -669,15 +664,15 @@ public class BankStatementController {
     BigDecimal selfAmount = BigDecimal.ZERO;
     String displayName = null;
 
-    for (BankStatementTransaction t : txns) {
-      if (!key.equals(normalizeCounterpartyName(t.getCounterpartyName()))) {
+    for (TxnLite t : txns) {
+      if (!key.equals(normalizeCounterpartyName(t.counterpartyName()))) {
         continue;
       }
-      String direction = t.getDirection();
+      String direction = t.direction();
       if (!"入".equals(direction) && !"出".equals(direction)) {
         continue;
       }
-      BankStatement statement = statementById.get(t.getStatement().getId());
+      BankStatement statement = statementById.get(t.statementId());
       if (statement == null) {
         continue;
       }
@@ -688,14 +683,14 @@ public class BankStatementController {
       if (!accountFilter.isEmpty() && !accountFilter.equals(digitsOnly(statement.getAccountNo()))) {
         continue;
       }
-      if (from != null && (t.getTransDate() == null || t.getTransDate().isBefore(from))) {
+      if (from != null && (t.transDate() == null || t.transDate().isBefore(from))) {
         continue;
       }
-      if (to != null && (t.getTransDate() == null || t.getTransDate().isAfter(to))) {
+      if (to != null && (t.transDate() == null || t.transDate().isAfter(to))) {
         continue;
       }
       boolean self = isSelfTransfer(t, key, ownHolder, accountOwner);
-      BigDecimal amount = nz(t.getAmount()).abs();
+      BigDecimal amount = nz(t.amount()).abs();
       BigDecimal signed = "入".equals(direction) ? amount : amount.negate();
       if ("入".equals(direction)) {
         incomeCount++;
@@ -709,10 +704,10 @@ public class BankStatementController {
         selfAmount = selfAmount.add(amount);
       }
       if (displayName == null) {
-        displayName = displayCounterpartyName(t.getCounterpartyName());
+        displayName = displayCounterpartyName(t.counterpartyName());
       }
-      items.add(new CounterpartyTxn(t.getId(), statement.getId(), t.getTransDate(), direction,
-        signed, t.getSummary(), statement.getBankName(), statement.getAccountNo(),
+      items.add(new CounterpartyTxn(t.id(), statement.getId(), t.transDate(), direction,
+        signed, t.summary(), statement.getBankName(), statement.getAccountNo(),
         statement.getAccountHolder(), self));
     }
     items.sort(Comparator.comparing(CounterpartyTxn::transDate,
@@ -776,12 +771,12 @@ public class BankStatementController {
   /**
    * 自有账户互转：对方户名等于己方户名，或对方账号属于同一客户的其他可见账户。
    */
-  private static boolean isSelfTransfer(BankStatementTransaction t, String normalizedName,
+  private static boolean isSelfTransfer(TxnLite t, String normalizedName,
                                         String ownHolder, Map<String, String> accountOwner) {
     if (!ownHolder.isEmpty() && ownHolder.equals(normalizedName)) {
       return true;
     }
-    String cpAccount = digitsOnly(t.getCounterpartyAccount());
+    String cpAccount = digitsOnly(t.counterpartyAccount());
     if (cpAccount.isEmpty()) {
       return false;
     }
@@ -813,12 +808,12 @@ public class BankStatementController {
   /**
    * 交易排序：日期、时间、序号、id。
    */
-  private static Comparator<BankStatementTransaction> txnOrder() {
+  private static Comparator<TxnLite> txnOrder() {
     return Comparator
-      .comparing(BankStatementTransaction::getTransDate, Comparator.nullsLast(Comparator.naturalOrder()))
-      .thenComparing(t -> t.getTransTime() == null ? "" : t.getTransTime())
-      .thenComparing(t -> t.getSeqNo() == null ? Integer.MAX_VALUE : t.getSeqNo())
-      .thenComparing(BankStatementTransaction::getId);
+      .comparing(TxnLite::transDate, Comparator.nullsLast(Comparator.naturalOrder()))
+      .thenComparing(t -> t.transTime() == null ? "" : t.transTime())
+      .thenComparing(t -> t.seqNo() == null ? Integer.MAX_VALUE : t.seqNo())
+      .thenComparing(TxnLite::id);
   }
 
   /**
@@ -828,7 +823,7 @@ public class BankStatementController {
    * 上一份流水单末笔交易之后到账期结束的余额按最后余额延续处理。
    */
   private static Map<Long, CarryIn> buildCarryIns(List<BankStatement> statements,
-                                                  Map<Long, List<BankStatementTransaction>> txnsByStatement) {
+                                                  Map<Long, List<TxnLite>> txnsByStatement) {
     Map<String, List<BankStatement>> byAccount = new HashMap<>();
     for (BankStatement s : statements) {
       String accountNo = s.getAccountNo() == null ? "" : s.getAccountNo().trim();
@@ -859,11 +854,11 @@ public class BankStatementController {
   /**
    * 末笔有余额交易的余额；无余额数据时返回 null。
    */
-  private static BigDecimal closingBalanceOf(List<BankStatementTransaction> source) {
+  private static BigDecimal closingBalanceOf(List<TxnLite> source) {
     return source.stream()
-      .filter(t -> t.getBalance() != null && t.getTransDate() != null)
+      .filter(t -> t.balance() != null && t.transDate() != null)
       .max(txnOrder())
-      .map(BankStatementTransaction::getBalance)
+      .map(TxnLite::balance)
       .orElse(null);
   }
 
@@ -881,9 +876,9 @@ public class BankStatementController {
    * </ul>
    */
   private static AccountBalanceOverview buildOverview(BankStatement statement,
-                                                      List<BankStatementTransaction> source,
+                                                      List<TxnLite> source,
                                                       CarryIn carryIn) {
-    List<BankStatementTransaction> sorted = new ArrayList<>(source);
+    List<TxnLite> sorted = new ArrayList<>(source);
     sorted.sort(txnOrder());
 
 
@@ -892,13 +887,13 @@ public class BankStatementController {
     List<InterestItem> interestExpenses = new ArrayList<>();
     BigDecimal interestTotal = BigDecimal.ZERO;
     BigDecimal interestExpenseTotal = BigDecimal.ZERO;
-    for (BankStatementTransaction t : sorted) {
+    for (TxnLite t : sorted) {
       if (!isInterestText(t)) {
         continue;
       }
-      BigDecimal amount = nz(t.getAmount());
-      String direction = t.getDirection() == null
-        ? (amount.signum() >= 0 ? "入" : "出") : t.getDirection();
+      BigDecimal amount = nz(t.amount());
+      String direction = t.direction() == null
+        ? (amount.signum() >= 0 ? "入" : "出") : t.direction();
       if ("其他".equals(direction)) {
         continue;
       }
@@ -908,21 +903,21 @@ public class BankStatementController {
         }
         BigDecimal income = amount.abs();
         interestTotal = interestTotal.add(income);
-        interests.add(new InterestItem(t.getId(), t.getTransDate(), income, direction,
-          t.getCounterpartyName(), t.getSummary()));
+        interests.add(new InterestItem(t.id(), t.transDate(), income, direction,
+          t.counterpartyName(), t.summary()));
       } else {
         if (!isInterestExpense(t)) {
           continue;
         }
         BigDecimal expense = amount.abs();
         interestExpenseTotal = interestExpenseTotal.add(expense);
-        interestExpenses.add(new InterestItem(t.getId(), t.getTransDate(), expense.negate(), direction,
-          t.getCounterpartyName(), t.getSummary()));
+        interestExpenses.add(new InterestItem(t.id(), t.transDate(), expense.negate(), direction,
+          t.counterpartyName(), t.summary()));
       }
     }
 
-    List<BankStatementTransaction> withBalance = sorted.stream()
-      .filter(t -> t.getBalance() != null && t.getTransDate() != null)
+    List<TxnLite> withBalance = sorted.stream()
+      .filter(t -> t.balance() != null && t.transDate() != null)
       .toList();
     if (withBalance.isEmpty()) {
       return new AccountBalanceOverview(false,
@@ -933,25 +928,25 @@ public class BankStatementController {
         interestExpenses.size(), interestExpenseTotal, interestExpenses);
     }
 
-    BankStatementTransaction first = withBalance.get(0);
-    BankStatementTransaction last = withBalance.get(withBalance.size() - 1);
-    LocalDate firstTxnDate = first.getTransDate();
+    TxnLite first = withBalance.get(0);
+    TxnLite last = withBalance.get(withBalance.size() - 1);
+    LocalDate firstTxnDate = first.transDate();
     LocalDate statStart = firstTxnDate;
     // 无上期可承接时期初余额 = 首笔交易后余额 - 首笔金额；可承接时为上一份流水单期末余额
-    BigDecimal openingBalance = first.getBalance().subtract(nz(first.getAmount()));
+    BigDecimal openingBalance = first.balance().subtract(nz(first.amount()));
     if (carryIn != null) {
       statStart = carryIn.fromDate().isBefore(statStart) ? carryIn.fromDate() : statStart;
       openingBalance = carryIn.openingBalance();
     }
-    LocalDate statEnd = statement.getEndDate() != null && statement.getEndDate().isAfter(last.getTransDate())
-      ? statement.getEndDate() : last.getTransDate();
+    LocalDate statEnd = statement.getEndDate() != null && statement.getEndDate().isAfter(last.transDate())
+      ? statement.getEndDate() : last.transDate();
     long statDays = ChronoUnit.DAYS.between(statStart, statEnd) + 1;
-    BigDecimal closingBalance = last.getBalance();
+    BigDecimal closingBalance = last.balance();
 
     // 每个交易日的日末余额（当天最后一笔有余额交易）
     TreeMap<LocalDate, BigDecimal> dayEndBalances = new TreeMap<>();
-    for (BankStatementTransaction t : withBalance) {
-      dayEndBalances.put(t.getTransDate(), t.getBalance());
+    for (TxnLite t : withBalance) {
+      dayEndBalances.put(t.transDate(), t.balance());
     }
 
     BigDecimal sum = BigDecimal.ZERO;
@@ -969,18 +964,18 @@ public class BankStatementController {
     BigDecimal maxBalance = openingBalance;
     LocalDate maxDate = statStart;
     String maxSource = "OPENING";
-    BankStatementTransaction maxTxn = null;
-    for (BankStatementTransaction t : withBalance) {
-      if (t.getBalance().compareTo(maxBalance) >= 0) {
-        maxBalance = t.getBalance();
-        maxDate = t.getTransDate();
+    TxnLite maxTxn = null;
+    for (TxnLite t : withBalance) {
+      if (t.balance().compareTo(maxBalance) >= 0) {
+        maxBalance = t.balance();
+        maxDate = t.transDate();
         maxSource = "TRANSACTION";
         maxTxn = t;
       }
     }
-    MaxBalanceTxn maxBalanceTxn = maxTxn == null ? null : new MaxBalanceTxn(maxTxn.getId(),
-      maxTxn.getTransDate(), maxTxn.getAmount(), maxTxn.getDirection(),
-      maxTxn.getCounterpartyName(), maxTxn.getSummary(), maxTxn.getRemark());
+    MaxBalanceTxn maxBalanceTxn = maxTxn == null ? null : new MaxBalanceTxn(maxTxn.id(),
+      maxTxn.transDate(), maxTxn.amount(), maxTxn.direction(),
+      maxTxn.counterpartyName(), maxTxn.summary(), maxTxn.remark());
 
     StringBuilder note = new StringBuilder();
     if (carryIn != null) {
@@ -995,7 +990,7 @@ public class BankStatementController {
       long gap = ChronoUnit.DAYS.between(statement.getStartDate(), statStart);
       note.append("账期起始早于首笔有余额交易日，前置 ").append(gap).append(" 天因期初余额未知未计入；");
     }
-    if (statement.getEndDate() != null && statement.getEndDate().isAfter(last.getTransDate())) {
+    if (statement.getEndDate() != null && statement.getEndDate().isAfter(last.transDate())) {
       note.append("末笔交易后至账期结束按最后余额延续；");
     }
     if (withBalance.size() < sorted.size()) {
@@ -1017,9 +1012,9 @@ public class BankStatementController {
   /**
    * 摘要或对方是否含结息/利息字样。
    */
-  private static boolean isInterestText(BankStatementTransaction t) {
-    String summary = t.getSummary() == null ? "" : t.getSummary();
-    String counterparty = t.getCounterpartyName() == null ? "" : t.getCounterpartyName();
+  private static boolean isInterestText(TxnLite t) {
+    String summary = t.summary() == null ? "" : t.summary();
+    String counterparty = t.counterpartyName() == null ? "" : t.counterpartyName();
     return summary.contains("结息") || summary.contains("利息")
       || counterparty.contains("结息") || counterparty.contains("利息");
   }
@@ -1027,13 +1022,13 @@ public class BankStatementController {
   /**
    * 是否为利息入账：方向为入，排除保证金扣款等非利息入账。
    */
-  private static boolean isInterestIncome(BankStatementTransaction t) {
+  private static boolean isInterestIncome(TxnLite t) {
     if (!isInterestText(t)) {
       return false;
     }
-    String summary = t.getSummary() == null ? "" : t.getSummary();
-    boolean incoming = "入".equals(t.getDirection())
-      || (t.getDirection() == null && nz(t.getAmount()).signum() > 0);
+    String summary = t.summary() == null ? "" : t.summary();
+    boolean incoming = "入".equals(t.direction())
+      || (t.direction() == null && nz(t.amount()).signum() > 0);
     if (!incoming) {
       return false;
     }
@@ -1044,13 +1039,13 @@ public class BankStatementController {
   /**
    * 是否为利息支出/扣息：方向为出，排除保证金类扣款。
    */
-  private static boolean isInterestExpense(BankStatementTransaction t) {
+  private static boolean isInterestExpense(TxnLite t) {
     if (!isInterestText(t)) {
       return false;
     }
-    String summary = t.getSummary() == null ? "" : t.getSummary();
-    boolean outgoing = "出".equals(t.getDirection())
-      || (t.getDirection() == null && nz(t.getAmount()).signum() < 0);
+    String summary = t.summary() == null ? "" : t.summary();
+    boolean outgoing = "出".equals(t.direction())
+      || (t.direction() == null && nz(t.amount()).signum() < 0);
     return outgoing && !summary.contains("保证金");
   }
 

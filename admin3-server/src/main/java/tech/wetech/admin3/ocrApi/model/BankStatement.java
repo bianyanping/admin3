@@ -31,7 +31,9 @@ import java.util.List;
     columnNames = {"bankCode", "accountNo", "startDate", "endDate"}),
   indexes = {
     @Index(name = "idx_bank_statement_bank_code", columnList = "bankCode"),
-    @Index(name = "idx_bank_statement_account_no", columnList = "accountNo")
+    @Index(name = "idx_bank_statement_account_no", columnList = "accountNo"),
+    // 组织范围过滤
+    @Index(name = "idx_bank_statement_org_id", columnList = "orgId")
   })
 @Comment("银行流水单：一条记录=某银行某账号某账期的一份对账单解析结果，判重键=银行编码+账号+起止日期")
 public class BankStatement extends BaseEntity {

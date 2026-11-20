@@ -22,6 +22,7 @@ import tech.wetech.admin3.common.CommonResultStatus;
 import tech.wetech.admin3.common.Constants;
 import tech.wetech.admin3.common.SessionItemHolder;
 import tech.wetech.admin3.common.authz.RequiresPermissions;
+import tech.wetech.admin3.common.scope.OrgScopeService;
 import tech.wetech.admin3.ocrApi.model.BankStatement;
 import tech.wetech.admin3.ocrApi.model.BankStatementShare;
 import tech.wetech.admin3.ocrApi.model.BankStatementTransaction;
@@ -74,6 +75,7 @@ public class BankStatementController {
   private final UserRepository userRepository;
   private final RiskDatabaseService riskDatabaseService;
   private final RiskAlertService riskAlertService;
+  private final OrgScopeService orgScope;
 
   public BankStatementController(BankStatementRepository bankStatementRepository,
                                  BankStatementTransactionRepository transactionRepository,
@@ -82,7 +84,8 @@ public class BankStatementController {
                                  BankStatementShareRepository shareRepository,
                                  UserRepository userRepository,
                                  RiskDatabaseService riskDatabaseService,
-                                 RiskAlertService riskAlertService) {
+                                 RiskAlertService riskAlertService,
+                                 OrgScopeService orgScope) {
     this.bankStatementRepository = bankStatementRepository;
     this.transactionRepository = transactionRepository;
     this.storageService = storageService;
@@ -91,6 +94,7 @@ public class BankStatementController {
     this.userRepository = userRepository;
     this.riskDatabaseService = riskDatabaseService;
     this.riskAlertService = riskAlertService;
+    this.orgScope = orgScope;
   }
 
   private Long currentUserId() {
@@ -241,7 +245,16 @@ public class BankStatementController {
     LocalDate to = LocalDate.now();
     LocalDate from = to.minusDays(window - 1L);
 
-    List<Long> statementIds = visibleStatementIds(currentUserId());
+    // 首页统计复用统一组织范围：本组织及下级，管理员全局可见；不叠加跨组织分享
+    List<BankStatement> scopedStatements = bankStatementRepository.findAll(orgScope.scoped("orgId"));
+    List<Long> statementIds = scopedStatements.stream().map(BankStatement::getId).toList();
+    List<String> holders = scopedStatements.stream()
+      .map(BankStatement::getAccountHolder)
+      .filter(holder -> holder != null && !holder.isBlank())
+      .map(String::trim)
+      .distinct()
+      .sorted()
+      .toList();
     List<BankStatementTransaction> txns = new ArrayList<>();
     if (!statementIds.isEmpty()) {
       Specification<BankStatementTransaction> spec = (root, query, cb) -> {
@@ -336,7 +349,7 @@ public class BankStatementController {
 
     return ResponseEntity.ok(new DashboardStats(
       txns.size(), totalIncome, totalExpense, todayCount, anomalyCount, ANOMALY_THRESHOLD,
-      dailyPoints, categories, top, recentLarge));
+      holders, dailyPoints, categories, top, recentLarge));
   }
 
   /**
@@ -505,7 +518,7 @@ public class BankStatementController {
 
     Map<String, CpAgg> groups = new HashMap<>();
     // 消费型大众对手（抖音/美团/微信转账等）不作为可打标的正常对手展示
-    Set<String> consumerKeys = riskDatabaseService.consumerNameKeys();
+    Set<String> consumerKeys = riskDatabaseService.consumerNameKeys(currentUserId());
     long excludedBlank = 0;
     long totalTxn = 0;
     BigDecimal totalIncome = BigDecimal.ZERO;
@@ -1106,6 +1119,7 @@ public class BankStatementController {
     long todayCount,
     long anomalyCount,
     BigDecimal anomalyThreshold,
+    List<String> holders,
     List<DailyPoint> daily,
     List<CategoryStat> categories,
     List<CounterpartyStat> topCounterparties,

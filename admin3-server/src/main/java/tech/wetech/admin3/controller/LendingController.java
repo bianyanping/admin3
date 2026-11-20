@@ -51,7 +51,7 @@ public class LendingController {
     @RequestParam(value = "enabled", required = false) Boolean enabled,
     @RequestParam(value = "page", defaultValue = "1") int page,
     @RequestParam(value = "size", defaultValue = "20") int size) {
-    return ResponseEntity.ok(lendingService.listPlatforms(keyword, enabled, page, size));
+    return ResponseEntity.ok(lendingService.listPlatforms(currentUserId(), keyword, enabled, page, size));
   }
 
   /**
@@ -60,7 +60,7 @@ public class LendingController {
   @GetMapping("/platforms/options")
   @RequiresPermissions("lending:view")
   public ResponseEntity<List<LendingService.PlatformOption>> platformOptions() {
-    return ResponseEntity.ok(lendingService.listPlatformOptions());
+    return ResponseEntity.ok(lendingService.listPlatformOptions(currentUserId()));
   }
 
   /**
@@ -69,13 +69,13 @@ public class LendingController {
   @PostMapping("/platforms/init")
   @RequiresPermissions("lending:manage")
   public ResponseEntity<LendingService.InitResult> initPresets() {
-    return ResponseEntity.ok(lendingService.initPresets());
+    return ResponseEntity.ok(lendingService.initPresets(currentUserId()));
   }
 
   @PostMapping("/platforms")
   @RequiresPermissions("lending:manage")
   public ResponseEntity<LendingPlatform> createPlatform(@RequestBody @Valid PlatformRequest request) {
-    LendingPlatform platform = lendingService.createPlatform(request.name(), request.keywords(),
+    LendingPlatform platform = lendingService.createPlatform(currentUserId(), request.name(), request.keywords(),
       request.enabled(), request.remark());
     return new ResponseEntity<>(platform, HttpStatus.CREATED);
   }
@@ -84,14 +84,14 @@ public class LendingController {
   @RequiresPermissions("lending:manage")
   public ResponseEntity<LendingPlatform> updatePlatform(@PathVariable Long id,
                                                         @RequestBody @Valid PlatformRequest request) {
-    return ResponseEntity.ok(lendingService.updatePlatform(id, request.name(), request.keywords(),
+    return ResponseEntity.ok(lendingService.updatePlatform(currentUserId(), id, request.name(), request.keywords(),
       request.enabled(), request.remark()));
   }
 
   @DeleteMapping("/platforms/{id}")
   @RequiresPermissions("lending:manage")
   public ResponseEntity<Void> deletePlatform(@PathVariable Long id) {
-    lendingService.deletePlatform(id);
+    lendingService.deletePlatform(currentUserId(), id);
     return ResponseEntity.noContent().build();
   }
 
@@ -102,7 +102,7 @@ public class LendingController {
   @RequiresPermissions("lending:manage")
   public ResponseEntity<LendingPlatform> setPlatformEnabled(@PathVariable Long id,
                                                             @RequestBody @Valid EnabledRequest request) {
-    return ResponseEntity.ok(lendingService.setPlatformEnabled(id, request.enabled()));
+    return ResponseEntity.ok(lendingService.setPlatformEnabled(currentUserId(), id, request.enabled()));
   }
 
   // ==================== 匹配与统计 ====================
@@ -113,7 +113,7 @@ public class LendingController {
   @PostMapping("/matches/refresh")
   @RequiresPermissions("lending:manage")
   public ResponseEntity<LendingService.RefreshResult> refreshMatches() {
-    return ResponseEntity.ok(lendingService.refreshMatches());
+    return ResponseEntity.ok(lendingService.refreshMatches(currentUserId()));
   }
 
   /**

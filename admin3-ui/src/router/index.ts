@@ -103,6 +103,7 @@ const routes: RouteRecordRaw[] = [
         name: 'riskDatabase',
         meta: {
           title: '风险数据库',
+          permissions: ['risk:funder:view', 'risk:blacklist:view', 'risk:counterparty:view'],
         },
         component: () => import(/* webpackChunkName: "risk" */ '../views/risk-database.vue'),
       },
@@ -154,14 +155,21 @@ router.beforeEach(async (to, from, next) => {
   const basicStore = useBasicStore();
   if (!token && to.path !== '/login') {
     next('/login');
-  } /*else if (to.meta.permiss && !permiss.key.includes(to.meta.permiss)) {
-        // 如果没有权限，则进入403
-        next('/403');
-    }*/ else {
-    if (token) {
-      await basicStore.fetchUserinfo();
-    }
-    next();
+    return;
   }
+  if (token) {
+    await basicStore.fetchUserinfo();
+  }
+  // 页面级权限：要求命中任一权限（超级管理员 * 直接放行）
+  const required = to.meta.permissions as string[] | undefined;
+  if (required && required.length > 0) {
+    const permissions: string[] = (basicStore.userinfo?.permissions as any) || [];
+    const allowed = permissions.includes('*') || required.some((permission) => permissions.includes(permission));
+    if (!allowed) {
+      next('/403');
+      return;
+    }
+  }
+  next();
 });
 export default router;

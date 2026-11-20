@@ -4,7 +4,7 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.Comment;
-import tech.wetech.admin3.sys.model.BaseEntity;
+import tech.wetech.admin3.common.scope.OrgOwnedEntity;
 
 import java.time.LocalDateTime;
 
@@ -12,14 +12,15 @@ import java.time.LocalDateTime;
  * 网贷平台关键词库：平台名称 + 匹配关键词，支持手工维护。
  *
  * <p>匹配口径：交易对手户名或摘要命中任一关键词，即视为该平台的网贷相关交易。
+ * 关键词库按组织独立维护，写入时自动归属当前用户组织。
  */
 @Entity
 @Getter
 @Setter
 @Table(name = "lending_platform",
-  uniqueConstraints = @UniqueConstraint(name = "uk_lending_platform_name", columnNames = {"name"}))
-@Comment("网贷平台关键词库：平台名称加匹配关键词，可手工维护")
-public class LendingPlatform extends BaseEntity {
+  uniqueConstraints = @UniqueConstraint(name = "uk_lending_platform_org_name", columnNames = {"org_id", "name"}))
+@Comment("网贷平台关键词库：按组织独立维护，平台名称加匹配关键词")
+public class LendingPlatform extends OrgOwnedEntity {
 
   @Comment("平台/产品名称，如 借呗、微粒贷")
   @Column(nullable = false, length = 128)

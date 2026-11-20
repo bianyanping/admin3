@@ -20,12 +20,14 @@ public interface RiskTagLinkRepository extends JpaRepository<RiskTagLink, Long> 
 
   List<RiskTagLink> findBySubjectTypeAndSubjectKeyAndTagId(String subjectType, String subjectKey, Long tagId);
 
-  Optional<RiskTagLink> findBySubjectTypeAndSubjectKeyAndTagIdAndOwnerUserId(
-    String subjectType, String subjectKey, Long tagId, Long ownerUserId);
+  Optional<RiskTagLink> findBySubjectTypeAndSubjectKeyAndTagIdAndOrgId(
+    String subjectType, String subjectKey, Long tagId, Long orgId);
 
-  long countBySubjectTypeAndTagId(String subjectType, Long tagId);
-
-  long countBySubjectTypeAndTagIdAndOwnerUserId(String subjectType, Long tagId, Long ownerUserId);
+  /**
+   * 统计可见的手工标签数量：org_id 落在当前可见组织集合内。
+   */
+  long countBySubjectTypeAndTagIdAndSourceAndOrgIdIn(String subjectType, Long tagId, String source,
+                                                     Collection<Long> orgIds);
 
   @Modifying
   @Query("delete from RiskTagLink l where l.tagId = :tagId and l.source = :source")

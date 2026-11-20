@@ -95,7 +95,8 @@ const getDataNode: any = (menus: any[], parentId: number) => {
 
 const route = useRoute();
 const onRoutes = computed(() => {
-  return route.path;
+  // 风险数据库等页面通过 ?tab= 区分模块菜单，需用 fullPath 才能正确高亮
+  return route.fullPath;
 });
 
 const sidebar = useSidebarStore();

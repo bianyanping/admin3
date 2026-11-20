@@ -1,28 +1,26 @@
 package tech.wetech.admin3.risk.repository;
 
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import tech.wetech.admin3.common.scope.OrgScopedRepository;
 import tech.wetech.admin3.risk.model.RiskCounterparty;
 
 import java.util.List;
 
 @Repository
-public interface RiskCounterpartyRepository extends JpaRepository<RiskCounterparty, Long>,
-  JpaSpecificationExecutor<RiskCounterparty> {
-
-  long countByConsumer(Boolean consumer);
+public interface RiskCounterpartyRepository extends OrgScopedRepository<RiskCounterparty, Long> {
 
   List<RiskCounterparty> findByConsumer(Boolean consumer);
 
-  List<RiskCounterparty> findByOwnerUserId(Long ownerUserId);
+  List<RiskCounterparty> findByOrgId(Long orgId);
 
-  long countByOwnerUserId(Long ownerUserId);
+  List<RiskCounterparty> findByOrgIdAndConsumer(Long orgId, Boolean consumer);
+
+  long countByOrgId(Long orgId);
 
   @Modifying
-  @Query("delete from RiskCounterparty c where c.ownerUserId = :ownerUserId")
-  void deleteByOwnerUserId(@Param("ownerUserId") Long ownerUserId);
+  @Query("delete from RiskCounterparty c where c.orgId = :orgId")
+  void deleteByOrgId(@Param("orgId") Long orgId);
 }

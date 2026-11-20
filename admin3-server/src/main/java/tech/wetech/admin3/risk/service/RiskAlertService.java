@@ -5,6 +5,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import tech.wetech.admin3.common.BusinessException;
 import tech.wetech.admin3.common.CommonResultStatus;
+import tech.wetech.admin3.common.scope.OrgScopeService;
 import tech.wetech.admin3.ocrApi.model.BankStatement;
 import tech.wetech.admin3.ocrApi.model.BankStatementTransaction;
 import tech.wetech.admin3.ocrApi.repository.BankStatementRepository;
@@ -66,6 +67,7 @@ public class RiskAlertService {
   private final BankStatementRepository statementRepository;
   private final BankStatementTransactionRepository transactionRepository;
   private final BankStatementScopeService scopeService;
+  private final OrgScopeService orgScope;
   private final RiskDatabaseService riskDatabaseService;
 
   public RiskAlertService(RiskTagRepository tagRepository,
@@ -74,6 +76,7 @@ public class RiskAlertService {
                           BankStatementRepository statementRepository,
                           BankStatementTransactionRepository transactionRepository,
                           BankStatementScopeService scopeService,
+                          OrgScopeService orgScope,
                           RiskDatabaseService riskDatabaseService) {
     this.tagRepository = tagRepository;
     this.tagLinkRepository = tagLinkRepository;
@@ -81,6 +84,7 @@ public class RiskAlertService {
     this.statementRepository = statementRepository;
     this.transactionRepository = transactionRepository;
     this.scopeService = scopeService;
+    this.orgScope = orgScope;
     this.riskDatabaseService = riskDatabaseService;
   }
 
@@ -183,10 +187,14 @@ public class RiskAlertService {
     if (userId == null) {
       return new Index(List.of());
     }
-    // 保证当前用户的对手主数据已按可见流水沉淀，避免账号维度缺失
+    Long orgId = orgScope.dataOrgId(userId);
+    if (orgId == null) {
+      return new Index(List.of());
+    }
+    // 保证当前组织的对手主数据已按组织子树流水沉淀，避免账号维度缺失
     riskDatabaseService.syncIfNeeded(userId, false);
     Map<String, CustomerAgg> customers = new LinkedHashMap<>();
-    for (BankStatement s : visibleStatements(userId)) {
+    for (BankStatement s : statementsInOrgTree(orgId)) {
       String name = cleanName(s.getAccountHolder());
       String key = riskKey(name);
       if (key.isEmpty()) {
@@ -200,9 +208,9 @@ public class RiskAlertService {
       }
     }
 
-    // 对手库：只取当前用户自己沉淀的数据（管理员即全量），用于资方 / 黑名单对手的名称与卡号比对
+    // 对手库：只取当前组织沉淀的数据，用于资方 / 黑名单对手的名称与卡号比对
     Map<String, CpInfo> counterparties = new LinkedHashMap<>();
-    for (RiskCounterparty cp : counterpartyRepository.findByOwnerUserId(userId)) {
+    for (RiskCounterparty cp : counterpartyRepository.findByOrgId(orgId)) {
       String key = riskKey(cp.getNameKey());
       if (key.isEmpty()) {
         continue;
@@ -223,13 +231,14 @@ public class RiskAlertService {
 
     Map<Long, String> tagCodeById = tagRepository.findAll().stream()
       .collect(Collectors.toMap(RiskTag::getId, RiskTag::getCode, (a, b) -> a));
-    boolean admin = scopeService.isAdmin(userId);
+    boolean admin = orgScope.isAdmin(userId);
+    Set<Long> scopeOrgIds = orgScope.scopeOrgIds(userId);
     Set<String> funderKeys = new LinkedHashSet<>();
     Set<String> blacklistCpKeys = new LinkedHashSet<>();
     Set<String> blacklistCustomerKeys = new LinkedHashSet<>();
     for (RiskTagLink link : tagLinkRepository.findAll()) {
-      // 只比对当前用户可见的标签：系统标签全局可见，手工标签普通用户仅本人、管理员全部
-      if (!tagLinkVisible(link, userId, admin)) {
+      // 只比对可见标签：系统标签全局可见，手工标签可见本组织及下级组织，管理员全部
+      if (!tagLinkVisible(link, scopeOrgIds, admin)) {
         continue;
       }
       String code = tagCodeById.get(link.getTagId());
@@ -268,14 +277,27 @@ public class RiskAlertService {
     return new Index(targets);
   }
 
-  private boolean tagLinkVisible(RiskTagLink link, Long userId, boolean admin) {
+  private boolean tagLinkVisible(RiskTagLink link, Set<Long> scopeOrgIds, boolean admin) {
     if (RiskTagLink.SOURCE_SYSTEM.equals(link.getSource())) {
       return true;
     }
     if (admin) {
       return true;
     }
-    return userId != null && userId.equals(link.getOwnerUserId());
+    return scopeOrgIds.contains(orgScope.effectiveOrgId(link.getOrgId()));
+  }
+
+  /**
+   * 指定组织子树内的流水：严格按组织层级取数，不叠加单条流水分享。
+   */
+  private List<BankStatement> statementsInOrgTree(Long orgId) {
+    Set<Long> orgIds = orgScope.orgTree(orgId);
+    if (orgIds.isEmpty()) {
+      return List.of();
+    }
+    Specification<BankStatement> spec = (root, query, cb) ->
+      cb.coalesce(root.get("orgId"), OrgScopeService.ROOT_ORG_ID).in(orgIds);
+    return statementRepository.findAll(spec);
   }
 
   private String displayOf(CpInfo info, String key) {

@@ -12,13 +12,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import tech.wetech.admin3.common.scope.OrgScopeService;
 import tech.wetech.admin3.ocrApi.model.BankStatement;
 import tech.wetech.admin3.ocrApi.model.BankStatementTransaction;
 import tech.wetech.admin3.ocrApi.model.CreditReport;
 import tech.wetech.admin3.ocrApi.repository.BankStatementRepository;
 import tech.wetech.admin3.ocrApi.repository.BankStatementTransactionRepository;
 import tech.wetech.admin3.ocrApi.repository.CreditReportRepository;
-import tech.wetech.admin3.ocrApi.service.BankStatementScopeService;
 import tech.wetech.admin3.risk.model.RiskCounterparty;
 import tech.wetech.admin3.risk.model.RiskExclusionRule;
 import tech.wetech.admin3.risk.model.RiskTag;
@@ -64,10 +64,10 @@ public class RiskDatabaseService {
   private final BankStatementRepository statementRepository;
   private final BankStatementTransactionRepository transactionRepository;
   private final CreditReportRepository creditReportRepository;
-  private final BankStatementScopeService scopeService;
+  private final OrgScopeService orgScope;
   private final TransactionTemplate transactionTemplate;
 
-  private final Map<Long, LocalDateTime> lastSyncByUser = new java.util.concurrent.ConcurrentHashMap<>();
+  private final Map<Long, LocalDateTime> lastSyncByOrg = new java.util.concurrent.ConcurrentHashMap<>();
   private final Object syncLock = new Object();
 
   public RiskDatabaseService(RiskCounterpartyRepository counterpartyRepository,
@@ -77,7 +77,7 @@ public class RiskDatabaseService {
                              BankStatementRepository statementRepository,
                              BankStatementTransactionRepository transactionRepository,
                              CreditReportRepository creditReportRepository,
-                             BankStatementScopeService scopeService,
+                             OrgScopeService orgScope,
                              PlatformTransactionManager transactionManager) {
     this.counterpartyRepository = counterpartyRepository;
     this.tagRepository = tagRepository;
@@ -86,7 +86,7 @@ public class RiskDatabaseService {
     this.statementRepository = statementRepository;
     this.transactionRepository = transactionRepository;
     this.creditReportRepository = creditReportRepository;
-    this.scopeService = scopeService;
+    this.orgScope = orgScope;
     this.transactionTemplate = new TransactionTemplate(transactionManager);
   }
 
@@ -191,30 +191,32 @@ public class RiskDatabaseService {
   // ==================== 对手沉淀 ====================
 
   /**
-   * 按需同步：每个用户独立缓存，缓存有效且该用户已有数据时直接返回，否则只重建该用户的对手。
+   * 按需同步：每个组织独立缓存，缓存有效且该组织已有数据时直接返回，否则只重建该组织的对手。
+   * 数据源严格取本组织子树内的流水，不因单条流水分享跨组织扩散。
    */
   public SyncResult syncIfNeeded(Long userId, boolean force) {
-    if (userId == null) {
+    Long orgId = orgScope.dataOrgId(userId);
+    if (orgId == null) {
       return emptySyncResult();
     }
     synchronized (syncLock) {
-      LocalDateTime lastSync = lastSyncByUser.get(userId);
+      LocalDateTime lastSync = lastSyncByOrg.get(orgId);
       if (!force && lastSync != null && !lastSync.plus(SYNC_TTL).isBefore(LocalDateTime.now())
-        && counterpartyRepository.countByOwnerUserId(userId) > 0) {
-        return buildSyncResult(userId);
+        && counterpartyRepository.countByOrgId(orgId) > 0) {
+        return buildSyncResult(orgId);
       }
-      return rebuild(userId);
+      return rebuild(orgId);
     }
   }
 
-  private SyncResult rebuild(Long userId) {
-    SyncResult result = transactionTemplate.execute(status -> doRebuild(userId));
-    lastSyncByUser.put(userId, LocalDateTime.now());
+  private SyncResult rebuild(Long orgId) {
+    SyncResult result = transactionTemplate.execute(status -> doRebuild(orgId));
+    lastSyncByOrg.put(orgId, LocalDateTime.now());
     return result == null ? emptySyncResult() : result;
   }
 
-  private SyncResult doRebuild(Long userId) {
-    List<BankStatement> statements = visibleStatements(userId);
+  private SyncResult doRebuild(Long orgId) {
+    List<BankStatement> statements = statementsInOrgTree(orgId);
     Map<Long, String> holderByStatement = new HashMap<>();
     for (BankStatement s : statements) {
       holderByStatement.put(s.getId(), displayName(s.getAccountHolder()));
@@ -257,8 +259,8 @@ public class RiskDatabaseService {
       }
     }
 
-    // 只重建当前用户的数据，避免后一个访问者覆盖其他人的对手库
-    counterpartyRepository.deleteByOwnerUserId(userId);
+    // 只重建当前组织的数据，避免其他组织重建时互相覆盖
+    counterpartyRepository.deleteByOrgId(orgId);
     List<RiskCounterparty> entities = new ArrayList<>(groups.size());
     LocalDateTime now = LocalDateTime.now();
     long consumerTxn = 0;
@@ -272,7 +274,7 @@ public class RiskDatabaseService {
         consumerTxn += agg.txnCount;
       }
       RiskCounterparty entity = new RiskCounterparty();
-      entity.setOwnerUserId(userId);
+      entity.setOrgId(orgId);
       entity.setNameKey(entry.getKey());
       entity.setDisplayName(mostFrequent(agg.displayCounts));
       entity.setAccountNos(String.join(",", agg.accounts));
@@ -337,8 +339,8 @@ public class RiskDatabaseService {
     }
   }
 
-  private SyncResult buildSyncResult(Long userId) {
-    List<RiskCounterparty> all = counterpartyRepository.findByOwnerUserId(userId);
+  private SyncResult buildSyncResult(Long orgId) {
+    List<RiskCounterparty> all = counterpartyRepository.findByOrgId(orgId);
     long consumerTxn = all.stream().filter(RiskCounterparty::getConsumer)
       .mapToLong(e -> e.getTxnCount() == null ? 0 : e.getTxnCount()).sum();
     List<RiskExclusionRule> rules = exclusionRuleRepository.findByEnabledTrueOrderByIdAsc();
@@ -348,7 +350,7 @@ public class RiskDatabaseService {
       agg.txnCount = e.getTxnCount() == null ? 0 : e.getTxnCount();
       groups.put(e.getNameKey(), agg);
     }
-    LocalDateTime lastSync = lastSyncByUser.get(userId);
+    LocalDateTime lastSync = lastSyncByOrg.get(orgId);
     return new SyncResult(all.size(), (int) all.stream().filter(RiskCounterparty::getConsumer).count(),
       (int) all.stream().filter(e -> !e.getConsumer()).count(), consumerTxn,
       lastSync, buildRuleStats(groups, rules), consumerSamples(all));
@@ -395,19 +397,15 @@ public class RiskDatabaseService {
   public Summary summary(Long userId) {
     SyncResult sync = syncIfNeeded(userId, false);
     List<CustomerView> customers = customers(userId, null);
-    boolean admin = scopeService.isAdmin(userId);
+    Set<Long> scopeOrgIds = orgScope.scopeOrgIds(userId);
     RiskTag blacklist = tagRepository.findByCode("BLACKLIST_CUSTOMER").orElse(null);
     RiskTag funder = tagRepository.findByCode("FUNDER").orElse(null);
-    int blacklistCount = blacklist == null ? 0
-      : (int) (admin
-      ? tagLinkRepository.countBySubjectTypeAndTagId(RiskTag.SUBJECT_CUSTOMER, blacklist.getId())
-      : tagLinkRepository.countBySubjectTypeAndTagIdAndOwnerUserId(RiskTag.SUBJECT_CUSTOMER,
-      blacklist.getId(), userId));
-    int funderCount = funder == null ? 0
-      : (int) (admin
-      ? tagLinkRepository.countBySubjectTypeAndTagId(RiskTag.SUBJECT_COUNTERPARTY, funder.getId())
-      : tagLinkRepository.countBySubjectTypeAndTagIdAndOwnerUserId(RiskTag.SUBJECT_COUNTERPARTY,
-      funder.getId(), userId));
+    int blacklistCount = blacklist == null || scopeOrgIds.isEmpty() ? 0
+      : (int) tagLinkRepository.countBySubjectTypeAndTagIdAndSourceAndOrgIdIn(RiskTag.SUBJECT_CUSTOMER,
+      blacklist.getId(), RiskTagLink.SOURCE_MANUAL, scopeOrgIds);
+    int funderCount = funder == null || scopeOrgIds.isEmpty() ? 0
+      : (int) tagLinkRepository.countBySubjectTypeAndTagIdAndSourceAndOrgIdIn(RiskTag.SUBJECT_COUNTERPARTY,
+      funder.getId(), RiskTagLink.SOURCE_MANUAL, scopeOrgIds);
     return new Summary(sync.total(), sync.consumerCount(), sync.keptCount(), sync.consumerTxnCount(),
       customers.size(), blacklistCount, funderCount,
       exclusionRuleRepository.findByEnabledTrueOrderByIdAsc().size(),
@@ -420,14 +418,16 @@ public class RiskDatabaseService {
                                                String tagCode, int page, int size,
                                                String sortBy, String sortDir) {
     syncIfNeeded(userId, false);
-    boolean admin = scopeService.isAdmin(userId);
+    Long orgId = orgScope.dataOrgId(userId);
+    boolean admin = orgScope.isAdmin(userId);
+    Set<Long> scopeOrgIds = orgScope.scopeOrgIds(userId);
     RiskTag tag = tagCode == null || tagCode.isBlank() ? null
       : tagRepository.findByCode(tagCode).orElse(null);
 
     Specification<RiskCounterparty> spec = (root, query, cb) -> {
       List<Predicate> predicates = new ArrayList<>();
-      // 只展示当前用户自己沉淀的对手，避免不同用户之间串数据
-      predicates.add(cb.equal(root.get("ownerUserId"), userId));
+      // 只展示当前组织沉淀的对手（已覆盖本组织子树数据），避免跨组织串数据
+      predicates.add(orgId == null ? cb.disjunction() : cb.equal(root.get("orgId"), orgId));
       if (keyword != null && !keyword.isBlank()) {
         String like = "%" + keyword.trim().toLowerCase(Locale.ROOT) + "%";
         String digits = digitsOnly(keyword);
@@ -451,7 +451,8 @@ public class RiskDatabaseService {
         if (!admin) {
           linkPredicates.add(cb.or(
             cb.equal(link.get("source"), RiskTagLink.SOURCE_SYSTEM),
-            cb.equal(link.get("ownerUserId"), userId)));
+            scopeOrgIds.isEmpty() ? cb.disjunction()
+              : cb.coalesce(link.get("orgId"), OrgScopeService.ROOT_ORG_ID).in(scopeOrgIds)));
         }
         sub.select(link.get("subjectKey")).where(linkPredicates.toArray(new Predicate[0]));
         predicates.add(root.get("nameKey").in(sub));
@@ -486,7 +487,7 @@ public class RiskDatabaseService {
   // ==================== 客户（黑名单）列表 ====================
 
   public List<CustomerView> customers(Long userId, String keyword) {
-    List<BankStatement> statements = visibleStatements(userId);
+    List<BankStatement> statements = statementsOfCurrentOrgScope(userId);
     Map<String, CustAgg> groups = new TreeMap<>();
     for (BankStatement s : statements) {
       String name = displayName(s.getAccountHolder());
@@ -553,7 +554,7 @@ public class RiskDatabaseService {
   }
 
   /**
-   * 批量取标签：系统标签全局可见；手工标签普通用户只看自己打的，管理员看全部。
+   * 批量取标签：系统标签全局可见；手工标签可见本组织及下级组织打的标签，管理员全部。
    */
   public Map<String, List<TagView>> tagsByNames(String subjectType, java.util.Collection<String> names,
                                                  Long userId) {
@@ -562,12 +563,13 @@ public class RiskDatabaseService {
     if (keys.isEmpty()) {
       return Map.of();
     }
-    boolean admin = scopeService.isAdmin(userId);
+    boolean admin = orgScope.isAdmin(userId);
+    Set<Long> scopeOrgIds = orgScope.scopeOrgIds(userId);
     Map<Long, RiskTag> tagMap = tagRepository.findAll().stream()
       .collect(Collectors.toMap(RiskTag::getId, Function.identity()));
     Map<String, List<TagView>> result = new LinkedHashMap<>();
     for (RiskTagLink link : tagLinkRepository.findBySubjectTypeAndSubjectKeyIn(subjectType, keys)) {
-      if (!tagLinkVisible(link, userId, admin)) {
+      if (!tagLinkVisible(link, scopeOrgIds, admin)) {
         continue;
       }
       RiskTag tag = tagMap.get(link.getTagId());
@@ -582,16 +584,16 @@ public class RiskDatabaseService {
   }
 
   /**
-   * 标签可见性：系统标签全局可见；手工标签普通用户仅本人，管理员全部。
+   * 标签可见性：系统标签全局可见；手工标签可见本组织及下级组织，管理员全部。
    */
-  private boolean tagLinkVisible(RiskTagLink link, Long userId, boolean admin) {
+  private boolean tagLinkVisible(RiskTagLink link, Set<Long> scopeOrgIds, boolean admin) {
     if (RiskTagLink.SOURCE_SYSTEM.equals(link.getSource())) {
       return true;
     }
     if (admin) {
       return true;
     }
-    return userId != null && userId.equals(link.getOwnerUserId());
+    return scopeOrgIds.contains(orgScope.effectiveOrgId(link.getOrgId()));
   }
 
   @Transactional
@@ -606,14 +608,16 @@ public class RiskDatabaseService {
     if (key.isEmpty()) {
       throw new IllegalArgumentException("主体名称不能为空");
     }
+    Long orgId = orgScope.writeOrgId();
     RiskTagLink link = tagLinkRepository
-      .findBySubjectTypeAndSubjectKeyAndTagIdAndOwnerUserId(subjectType, key, tag.getId(), userId)
+      .findBySubjectTypeAndSubjectKeyAndTagIdAndOrgId(subjectType, key, tag.getId(), orgId)
       .orElseGet(() -> {
         RiskTagLink created = new RiskTagLink();
         created.setSubjectType(subjectType);
         created.setSubjectKey(key);
         created.setTagId(tag.getId());
         created.setSource(RiskTagLink.SOURCE_MANUAL);
+        created.setOrgId(orgId);
         created.setOwnerUserId(userId);
         created.setCreateUser(createUser);
         return created;
@@ -623,21 +627,21 @@ public class RiskDatabaseService {
   }
 
   /**
-   * 取消手工标签：普通用户只能取消自己打的，管理员可取消该主体上的全部手工标签。
-   * 系统标签不受影响。
+   * 取消手工标签：本组织及下级组织的手工标签可取消，管理员可取消全部；系统标签不受影响。
    */
   @Transactional
   public void unlinkTag(String subjectType, String rawSubject, String tagCode, Long userId) {
     RiskTag tag = tagRepository.findByCode(tagCode)
       .orElseThrow(() -> new IllegalArgumentException("标签不存在"));
     String key = normalize(rawSubject);
-    boolean admin = scopeService.isAdmin(userId);
+    boolean admin = orgScope.isAdmin(userId);
+    Set<Long> scopeOrgIds = orgScope.scopeOrgIds(userId);
     for (RiskTagLink link : tagLinkRepository.findBySubjectTypeAndSubjectKeyAndTagId(subjectType, key,
       tag.getId())) {
       if (!RiskTagLink.SOURCE_MANUAL.equals(link.getSource())) {
         continue;
       }
-      if (admin || (userId != null && userId.equals(link.getOwnerUserId()))) {
+      if (admin || scopeOrgIds.contains(orgScope.effectiveOrgId(link.getOrgId()))) {
         tagLinkRepository.delete(link);
       }
     }
@@ -669,7 +673,7 @@ public class RiskDatabaseService {
     applyRule(rule, source);
     rule.setBuiltin(Boolean.FALSE);
     RiskExclusionRule saved = exclusionRuleRepository.save(rule);
-    lastSyncByUser.clear();
+    lastSyncByOrg.clear();
     return toRuleView(saved);
   }
 
@@ -692,7 +696,7 @@ public class RiskDatabaseService {
     rule.setMatchType(matchType);
     applyRule(rule, source);
     RiskExclusionRule saved = exclusionRuleRepository.save(rule);
-    lastSyncByUser.clear();
+    lastSyncByOrg.clear();
     return toRuleView(saved);
   }
 
@@ -708,7 +712,7 @@ public class RiskDatabaseService {
       .orElseThrow(() -> new IllegalArgumentException("剔除规则不存在"));
     rule.setEnabled(enabled);
     RiskExclusionRule saved = exclusionRuleRepository.save(rule);
-    lastSyncByUser.clear();
+    lastSyncByOrg.clear();
     return toRuleView(saved);
   }
 
@@ -720,7 +724,7 @@ public class RiskDatabaseService {
       throw new IllegalArgumentException("预置规则不可删除，可停用");
     }
     exclusionRuleRepository.delete(rule);
-    lastSyncByUser.clear();
+    lastSyncByOrg.clear();
   }
 
   private RuleView toRuleView(RiskExclusionRule rule) {
@@ -730,26 +734,21 @@ public class RiskDatabaseService {
 
   // ==================== 内部工具 ====================
 
-  private List<BankStatement> visibleStatements(Long userId) {
-    if (userId == null) {
+  /**
+   * 指定组织子树内的流水：严格按组织层级取数，不叠加单条流水分享，避免跨组织扩散。
+   */
+  private List<BankStatement> statementsInOrgTree(Long orgId) {
+    Set<Long> orgIds = orgScope.orgTree(orgId);
+    if (orgIds.isEmpty()) {
       return List.of();
     }
-    BankStatementScopeService.Visibility visibility = scopeService.visibilityOf(userId);
-    if (visibility.nothing()) {
-      return List.of();
-    }
-    Specification<BankStatement> spec = (root, query, cb) -> {
-      List<Predicate> visible = new ArrayList<>();
-      if (!visibility.orgIds().isEmpty()) {
-        visible.add(cb.coalesce(root.get("orgId"), BankStatementScopeService.ROOT_ORG_ID)
-          .in(visibility.orgIds()));
-      }
-      if (!visibility.sharedIds().isEmpty()) {
-        visible.add(root.get("id").in(visibility.sharedIds()));
-      }
-      return cb.or(visible.toArray(new Predicate[0]));
-    };
+    Specification<BankStatement> spec = (root, query, cb) ->
+      cb.coalesce(root.get("orgId"), OrgScopeService.ROOT_ORG_ID).in(orgIds);
     return statementRepository.findAll(spec);
+  }
+
+  private List<BankStatement> statementsOfCurrentOrgScope(Long userId) {
+    return statementsInOrgTree(orgScope.dataOrgId(userId));
   }
 
   private List<BankStatementTransaction> loadTransactions(List<BankStatement> statements) {
@@ -792,10 +791,14 @@ public class RiskDatabaseService {
   }
 
   /**
-   * 当前被判定为消费型大众对手的名称键集合，供流水分析/网贷匹配复用，避免逐行查库。
+   * 当前组织被判定为消费型大众对手的名称键集合，供流水分析/网贷匹配复用，避免逐行查库。
    */
-  public Set<String> consumerNameKeys() {
-    return counterpartyRepository.findByConsumer(Boolean.TRUE).stream()
+  public Set<String> consumerNameKeys(Long userId) {
+    Long orgId = orgScope.dataOrgId(userId);
+    if (orgId == null) {
+      return Set.of();
+    }
+    return counterpartyRepository.findByOrgIdAndConsumer(orgId, Boolean.TRUE).stream()
       .map(RiskCounterparty::getNameKey)
       .collect(java.util.stream.Collectors.toSet());
   }

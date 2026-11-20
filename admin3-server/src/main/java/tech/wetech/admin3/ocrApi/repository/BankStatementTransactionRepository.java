@@ -3,11 +3,13 @@ package tech.wetech.admin3.ocrApi.repository;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import tech.wetech.admin3.ocrApi.model.BankStatementTransaction;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -25,6 +27,30 @@ public interface BankStatementTransactionRepository
     from BankStatementTransaction t join t.statement s
     """)
   List<LendingSourceView> findLendingSources();
+
+  /**
+   * 指定组织子树内的网贷匹配数据源（只读投影）。
+   */
+  @Query("""
+    select t.id as id, s.id as statementId, s.bankName as bankName,
+           s.accountHolder as accountHolder, s.accountNo as accountNo,
+           t.transDate as transDate, t.amount as amount, t.direction as direction,
+           t.counterpartyName as counterpartyName, t.summary as summary
+    from BankStatementTransaction t join t.statement s
+    where coalesce(s.orgId, :rootOrgId) in :orgIds
+    """)
+  List<LendingSourceView> findLendingSourcesByOrgIds(@Param("orgIds") Collection<Long> orgIds,
+                                                     @Param("rootOrgId") Long rootOrgId);
+
+  /**
+   * 指定组织子树内的流水笔数，用作命中率分母。
+   */
+  @Query("""
+    select count(t) from BankStatementTransaction t join t.statement s
+    where coalesce(s.orgId, :rootOrgId) in :orgIds
+    """)
+  long countLendingSourcesByOrgIds(@Param("orgIds") Collection<Long> orgIds,
+                                   @Param("rootOrgId") Long rootOrgId);
 
   /**
    * 网贷匹配数据源（只读投影）。

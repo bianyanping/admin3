@@ -12,6 +12,7 @@ import tech.wetech.admin3.common.Constants;
 import tech.wetech.admin3.common.SessionItemHolder;
 import tech.wetech.admin3.common.authz.PermissionHelper;
 import tech.wetech.admin3.common.authz.RequiresPermissions;
+import tech.wetech.admin3.common.scope.OrgScopeContext;
 import tech.wetech.admin3.sys.service.SessionService;
 import tech.wetech.admin3.sys.service.dto.UserinfoDTO;
 
@@ -29,6 +30,7 @@ public class AuthInterceptor implements HandlerInterceptor {
 
   @Override
   public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+    OrgScopeContext.clear();
     if (request.getHeader("Authorization") == null) {
       log.warn("Request uri {} {} is unauthorized", request.getMethod(), request.getRequestURI());
       throw new BusinessException(CommonResultStatus.UNAUTHORIZED);
@@ -47,6 +49,14 @@ public class AuthInterceptor implements HandlerInterceptor {
       }
     }
     SessionItemHolder.setItem(Constants.SESSION_CURRENT_USER, loginUserInfo);
+    // 写入组织上下文：业务实体持久化时自动归属，查询时统一叠加组织范围
+    OrgScopeContext.set(loginUserInfo.userId(), loginUserInfo.orgId(),
+      loginUserInfo.permissions() != null && loginUserInfo.permissions().contains("*"));
     return true;
+  }
+
+  @Override
+  public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
+    OrgScopeContext.clear();
   }
 }

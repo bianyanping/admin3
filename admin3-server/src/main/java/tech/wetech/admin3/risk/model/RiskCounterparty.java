@@ -4,7 +4,7 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.Comment;
-import tech.wetech.admin3.sys.model.BaseEntity;
+import tech.wetech.admin3.common.scope.OrgOwnedEntity;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -16,26 +16,24 @@ import java.time.LocalDateTime;
  * <p>主键维度为清洗后的对手名称（nameKey），同一名称下挂多个账号。
  * 消费型大众对手（抖音、美团、拼多多、淘宝、京东、微信、支付宝、饿了么等）
  * 由可配置的剔除规则判定，consumer=true 表示不进入默认列表。
+ *
+ * <p>数据按组织归属：每个组织按本组织子树流水沉淀一份，用户只能查看本组织及下级组织的数据。
  */
 @Entity
 @Getter
 @Setter
 @Table(name = "risk_counterparty",
-  uniqueConstraints = @UniqueConstraint(name = "uk_risk_counterparty_owner_name",
-    columnNames = {"owner_user_id", "name_key"}),
+  uniqueConstraints = @UniqueConstraint(name = "uk_risk_counterparty_org_name",
+    columnNames = {"org_id", "name_key"}),
   indexes = {
     @Index(name = "idx_risk_counterparty_consumer", columnList = "consumer"),
     @Index(name = "idx_risk_counterparty_txn_count", columnList = "txnCount"),
-    @Index(name = "idx_risk_counterparty_owner", columnList = "owner_user_id")
+    @Index(name = "idx_risk_counterparty_org", columnList = "org_id")
   })
-@Comment("交易对手主数据：按访问者可见流水各自沉淀，一行=一个清洗后的对手名称（含多个账号）")
-public class RiskCounterparty extends BaseEntity {
+@Comment("交易对手主数据：按组织子树流水沉淀，一行=一个清洗后的对手名称（含多个账号）")
+public class RiskCounterparty extends OrgOwnedEntity {
 
-  @Comment("归属用户 id：按该用户可见流水沉淀，互不覆盖；存量数据归属 admin")
-  @Column(name = "owner_user_id")
-  private Long ownerUserId;
-
-  @Comment("清洗后的对手名称（去空白+小写），与归属用户共同构成唯一键，标签挂载依据")
+  @Comment("清洗后的对手名称（去空白+小写），与归属组织共同构成唯一键，标签挂载依据")
   @Column(name = "name_key", nullable = false, length = 255)
   private String nameKey;
 

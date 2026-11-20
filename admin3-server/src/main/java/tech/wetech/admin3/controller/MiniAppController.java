@@ -114,7 +114,9 @@ public class MiniAppController {
       throw new BusinessException(CommonResultStatus.FAIL, "该账号缺少登录凭证，请联系管理员重置密码");
     }
     String token = UUID.randomUUID().toString().replace("-", "");
-    UserinfoDTO userinfo = new UserinfoDTO(token, user.getId(), user.getUsername(), user.getAvatar(), user.getIntro(),
+    UserinfoDTO userinfo = new UserinfoDTO(token, user.getId(),
+      user.getOrganization() == null ? null : user.getOrganization().getId(),
+      user.getUsername(), user.getAvatar(), user.getIntro(),
       new UserinfoDTO.Credential(credential.getIdentifier(), credential.getIdentityType()),
       user.findPermissions());
     sessionManager.store(token, credential, userinfo);

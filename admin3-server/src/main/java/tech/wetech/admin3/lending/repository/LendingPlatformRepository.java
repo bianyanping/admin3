@@ -1,20 +1,22 @@
 package tech.wetech.admin3.lending.repository;
 
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
+import tech.wetech.admin3.common.scope.OrgScopedRepository;
 import tech.wetech.admin3.lending.model.LendingPlatform;
 
 import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface LendingPlatformRepository
-  extends JpaRepository<LendingPlatform, Long>, JpaSpecificationExecutor<LendingPlatform> {
+public interface LendingPlatformRepository extends OrgScopedRepository<LendingPlatform, Long> {
 
-  Optional<LendingPlatform> findByName(String name);
+  Optional<LendingPlatform> findByNameAndOrgId(String name, Long orgId);
 
-  boolean existsByName(String name);
+  boolean existsByNameAndOrgId(String name, Long orgId);
 
-  List<LendingPlatform> findByEnabledTrueOrderByIdAsc();
+  Optional<LendingPlatform> findByIdAndOrgId(Long id, Long orgId);
+
+  List<LendingPlatform> findByEnabledTrueAndOrgIdOrderByIdAsc(Long orgId);
+
+  long countByOrgId(Long orgId);
 }

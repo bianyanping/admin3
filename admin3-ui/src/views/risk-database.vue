@@ -3,18 +3,18 @@
     <div class="risk-head">
       <div class="risk-head-main">
         <span class="risk-title">风险数据库</span>
-        <span class="card-sub" v-if="summary">
+        <span class="card-sub" v-if="summary && canViewCounterparty">
           交易对手主数据由 {{ summary.counterpartyTotal }} 条对手沉淀 · 消费型剔除
           {{ summary.consumerCount }} 条 · 客户 {{ summary.customerCount }} 户
           <template v-if="summary.syncTime"> · 沉淀时间 {{ summary.syncTime }}</template>
         </span>
       </div>
-      <el-button :icon="RefreshRight" :loading="syncing" @click="handleSync">重建对手库</el-button>
+      <el-button v-if="canManageCounterparty" :icon="RefreshRight" :loading="syncing" @click="handleSync">重建对手库</el-button>
     </div>
 
     <el-tabs v-model="activeTab" class="risk-tabs" @tab-change="onTabChange">
       <!-- ==================== ① 资方数据库 ==================== -->
-      <el-tab-pane label="资方数据库" name="funder">
+      <el-tab-pane v-if="canViewFunder" label="资方数据库" name="funder">
         <div class="handle-box">
           <el-input
             v-model="funderQuery.keyword"
@@ -24,7 +24,7 @@
             @keyup.enter="searchFunders"
           ></el-input>
           <el-button type="primary" :icon="Search" @click="searchFunders">搜索</el-button>
-          <el-button type="warning" :icon="Pointer" @click="activeTab = 'counterparty'">去交易对手库标记</el-button>
+          <el-button v-if="canViewCounterparty" type="warning" :icon="Pointer" @click="goCounterparty">去交易对手库标记</el-button>
           <span class="card-sub">共 {{ funderTotal }} 个民间资方（手工标记）</span>
         </div>
 
@@ -52,7 +52,8 @@
           </el-table-column>
           <el-table-column label="操作" width="100" align="center" fixed="right">
             <template #default="{ row }">
-              <el-button text type="danger" size="small" @click="handleUnmarkFunder(row)">解除资方</el-button>
+              <el-button v-if="canManageFunder" text type="danger" size="small" @click="handleUnmarkFunder(row)">解除资方</el-button>
+              <span v-else class="muted">--</span>
             </template>
           </el-table-column>
         </el-table>
@@ -74,7 +75,7 @@
       </el-tab-pane>
 
       <!-- ==================== ② 黑名单数据库 ==================== -->
-      <el-tab-pane label="黑名单数据库" name="blacklist">
+      <el-tab-pane v-if="canViewBlacklist" label="黑名单数据库" name="blacklist">
         <div class="handle-box">
           <el-input
             v-model="customerKeyword"
@@ -105,14 +106,17 @@
           </el-table-column>
           <el-table-column label="操作" width="120" align="center" fixed="right">
             <template #default="{ row }">
-              <el-button
-                v-if="!hasTag(row.tags, 'BLACKLIST_CUSTOMER')"
-                text
-                type="danger"
-                size="small"
-                @click="markCustomer(row)"
-              >标记黑名单</el-button>
-              <el-button v-else text type="primary" size="small" @click="unmarkCustomer(row)">解除</el-button>
+              <template v-if="canManageBlacklist">
+                <el-button
+                  v-if="!hasTag(row.tags, 'BLACKLIST_CUSTOMER')"
+                  text
+                  type="danger"
+                  size="small"
+                  @click="markCustomer(row)"
+                >标记黑名单</el-button>
+                <el-button v-else text type="primary" size="small" @click="unmarkCustomer(row)">解除</el-button>
+              </template>
+              <span v-else class="muted">--</span>
             </template>
           </el-table-column>
         </el-table>
@@ -120,7 +124,7 @@
       </el-tab-pane>
 
       <!-- ==================== ③ 交易对手数据库 ==================== -->
-      <el-tab-pane label="交易对手数据库" name="counterparty">
+      <el-tab-pane v-if="canViewCounterparty" label="交易对手数据库" name="counterparty">
         <el-row :gutter="12" class="risk-stats" v-if="summary">
           <el-col :xs="12" :sm="12" :md="6">
             <div class="stat-card">
@@ -168,7 +172,14 @@
           <div class="exclude-line">
             <span class="exclude-label">剔除示例</span>
             <span class="card-sub">{{ summary.consumerSamples.join('、') || '--' }}</span>
-            <el-button text type="primary" size="small" class="rule-config-btn" @click="openRuleDrawer">
+            <el-button
+              v-if="canManageCounterparty"
+              text
+              type="primary"
+              size="small"
+              class="rule-config-btn"
+              @click="openRuleDrawer"
+            >
               剔除规则配置
             </el-button>
           </div>
@@ -233,17 +244,20 @@
           <el-table-column label="标签操作" min-width="190" align="center" fixed="right">
             <template #default="{ row }">
               <el-button
+                v-if="canManageFunder"
                 text
                 size="small"
                 :type="hasTag(row.tags, 'FUNDER') ? 'warning' : 'primary'"
                 @click="toggleCpTag(row, 'FUNDER')"
               >{{ hasTag(row.tags, 'FUNDER') ? '取消资方' : '标记资方' }}</el-button>
               <el-button
+                v-if="canManageCounterparty"
                 text
                 size="small"
                 :type="hasTag(row.tags, 'BLACKLIST_CP') ? 'danger' : 'primary'"
                 @click="toggleCpTag(row, 'BLACKLIST_CP')"
               >{{ hasTag(row.tags, 'BLACKLIST_CP') ? '取消黑名单' : '黑名单' }}</el-button>
+              <span v-if="!canManageFunder && !canManageCounterparty" class="muted">--</span>
             </template>
           </el-table-column>
         </el-table>
@@ -323,11 +337,13 @@
 </template>
 
 <script setup lang="ts">
-import {computed, onMounted, ref} from 'vue';
+import {computed, onMounted, ref, watch} from 'vue';
+import {useRoute, useRouter} from 'vue-router';
 import {ElMessage, ElMessageBox} from 'element-plus';
 import {Plus, Pointer, RefreshRight, Search} from '@element-plus/icons-vue';
 import RiskTags from '../components/RiskTags.vue';
 import type {RiskTagItem} from '../composables/useRiskTags';
+import {useBasicStore} from '../store/basic';
 import {
   createExclusionRule,
   deleteExclusionRule,
@@ -406,9 +422,39 @@ interface ExclusionRule {
   remark: string;
 }
 
-const activeTab = ref('funder');
 const summary = ref<Summary | null>(null);
 const syncing = ref(false);
+
+// ==================== 模块权限 ====================
+const MODULE_TABS = [
+  {name: 'funder', permission: 'risk:funder:view'},
+  {name: 'blacklist', permission: 'risk:blacklist:view'},
+  {name: 'counterparty', permission: 'risk:counterparty:view'},
+];
+
+const basicStore = useBasicStore();
+const route = useRoute();
+const router = useRouter();
+const permissions = computed<string[]>(() => (basicStore.userinfo?.permissions as any) || []);
+const can = (permission: string) =>
+  permissions.value.includes('*') || permissions.value.includes(permission);
+const canViewFunder = computed(() => can('risk:funder:view'));
+const canViewBlacklist = computed(() => can('risk:blacklist:view'));
+const canViewCounterparty = computed(() => can('risk:counterparty:view'));
+const canManageFunder = computed(() => can('risk:funder:manage'));
+const canManageBlacklist = computed(() => can('risk:blacklist:manage'));
+const canManageCounterparty = computed(() => can('risk:counterparty:manage'));
+const allowedTabs = computed(() => MODULE_TABS.filter((tab) => can(tab.permission)));
+
+const resolveTab = (name: string | undefined) => {
+  const allowed = allowedTabs.value;
+  if (name && allowed.some((tab) => tab.name === name)) {
+    return name;
+  }
+  return allowed[0]?.name;
+};
+
+const activeTab = ref(resolveTab(typeof route.query.tab === 'string' ? route.query.tab : undefined) || 'funder');
 
 const funderQuery = ref({keyword: '', page: 1, size: 20});
 const funderRows = ref<CounterpartyRow[]>([]);
@@ -447,6 +493,9 @@ const blacklistCount = computed(() =>
   customers.value.filter((c) => hasTag(c.tags, 'BLACKLIST_CUSTOMER')).length);
 
 const loadSummary = () => {
+  if (!canViewCounterparty.value) {
+    return;
+  }
   getRiskSummary().then((res: any) => {
     summary.value = res.data;
   });
@@ -498,16 +547,47 @@ const loadCounterparties = () => {
   });
 };
 
-const onTabChange = () => {
-  if (activeTab.value === 'funder') {
+const loadTab = (tab: string | undefined) => {
+  if (tab === 'funder') {
     loadFunders();
-  } else if (activeTab.value === 'blacklist') {
+  } else if (tab === 'blacklist') {
     loadCustomers();
-  } else {
+  } else if (tab === 'counterparty') {
     loadCounterparties();
   }
   loadSummary();
 };
+
+/**
+ * 切换模块：无权限的页签回落到第一个有权访问的模块，并把模块同步到 URL，保证菜单高亮与直达链接一致。
+ */
+const applyTab = (name: string | undefined, forceLoad: boolean) => {
+  const next = resolveTab(name);
+  if (!next) {
+    return false;
+  }
+  const changed = activeTab.value !== next;
+  activeTab.value = next;
+  if (route.query.tab !== next) {
+    router.replace({path: route.path, query: {...route.query, tab: next}});
+  }
+  if (changed || forceLoad) {
+    loadTab(next);
+  }
+  return true;
+};
+
+const onTabChange = (name: string | number) => {
+  applyTab(String(name), true);
+};
+
+const goCounterparty = () => {
+  applyTab('counterparty', true);
+};
+
+watch(() => route.query.tab, (value) => {
+  applyTab(typeof value === 'string' ? value : undefined, false);
+});
 
 const searchFunders = () => {
   funderQuery.value.page = 1;
@@ -541,8 +621,7 @@ const handleSync = () => {
   syncRiskCounterparties()
     .then(() => {
       ElMessage.success('交易对手库已重建');
-      loadSummary();
-      onTabChange();
+      loadTab(activeTab.value);
     })
     .finally(() => {
       syncing.value = false;
@@ -672,8 +751,10 @@ const removeRule = (row: ExclusionRule) => {
 };
 
 onMounted(() => {
-  loadSummary();
-  loadFunders();
+  const queryTab = typeof route.query.tab === 'string' ? route.query.tab : undefined;
+  if (!applyTab(queryTab, true)) {
+    router.replace('/403');
+  }
 });
 </script>
 

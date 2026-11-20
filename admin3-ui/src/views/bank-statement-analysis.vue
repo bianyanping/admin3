@@ -506,8 +506,9 @@
                 <span v-if="row.selfTransferCount > 0" class="cp-tag">自有互转</span>
               </div>
               <div class="sub" v-if="row.holderCount > 1">{{ row.holderCount }} 个客户</div>
-              <div class="cp-quick-tags" v-action:risk:view>
+              <div class="cp-quick-tags" v-if="canQuickTag">
                 <el-popconfirm
+                  v-if="canTagFunder"
                   :title="isTagged(row, 'FUNDER') ? '解除「民间资方」标记？' : '标记为民间资方？'"
                   confirm-button-text="确定"
                   cancel-button-text="取消"
@@ -522,6 +523,7 @@
                   </template>
                 </el-popconfirm>
                 <el-popconfirm
+                  v-if="canTagBlacklist"
                   :title="isTagged(row, 'BLACKLIST_CP') ? '解除「黑名单对手」标记？' : '标记为黑名单对手？'"
                   confirm-button-text="确定"
                   cancel-button-text="取消"
@@ -841,6 +843,7 @@ import type {RiskAlertSummary} from '../api/bankStatement';
 import {linkRiskTag, unlinkRiskTag} from '../api/risk';
 import RiskTags from '../components/RiskTags.vue';
 import RiskAlertPanel from '../components/RiskAlertPanel.vue';
+import {useBasicStore} from '../store/basic';
 
 interface AccountHolderOption {
   accountHolder: string;
@@ -1375,6 +1378,13 @@ const loadRiskAlerts = () => {
 
 // ========== 往来对手排行快捷打标 ==========
 const TAG_LABELS: Record<string, string> = {FUNDER: '资方', BLACKLIST_CP: '黑名单'};
+// 快捷打标沿用风险数据库对应模块的维护权限
+const basicStore = useBasicStore();
+const permissions = computed<string[]>(() => (basicStore.userinfo?.permissions as any) || []);
+const can = (permission: string) => permissions.value.includes('*') || permissions.value.includes(permission);
+const canTagFunder = computed(() => can('risk:funder:manage'));
+const canTagBlacklist = computed(() => can('risk:counterparty:manage'));
+const canQuickTag = computed(() => canTagFunder.value || canTagBlacklist.value);
 // 按「对手名|标签」记录请求中状态，避免重复点击
 const tagBusy = reactive<Record<string, boolean>>({});
 

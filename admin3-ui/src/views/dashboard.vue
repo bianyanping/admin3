@@ -156,7 +156,7 @@ import {computed, onMounted, reactive, ref} from 'vue';
 import {useRouter} from 'vue-router';
 import {Refresh} from '@element-plus/icons-vue';
 import Schart from 'vue-schart';
-import {getDashboard, listStatements} from '../api/bankStatement';
+import {getDashboard} from '../api/bankStatement';
 import {useRiskTags} from '../composables/useRiskTags';
 import RiskTags from '../components/RiskTags.vue';
 
@@ -244,21 +244,14 @@ const load = () => {
     accountHolder: accountHolder.value || undefined,
   }).then((res: any) => {
     Object.assign(stats, res.data || {});
+    // 户名下拉直接使用首页接口返回的当前组织范围数据，避免额外拉取流水列表
+    holders.value = res.data?.holders || [];
     // TOP 对手与大额流水中的对手名称批量取标签
     counterpartyTags.load([
       ...(stats.topCounterparties || []).map((item: any) => item.name),
       ...(stats.recentLarge || []).map((item: any) => item.counterpartyName),
     ]);
     buildCharts();
-  });
-};
-
-const loadHolders = () => {
-  listStatements({page: 1, size: 500}).then((res: any) => {
-    const names = (res.data?.content || [])
-      .map((s: any) => s.accountHolder)
-      .filter((n: string) => n && n.trim());
-    holders.value = Array.from(new Set(names));
   });
 };
 
@@ -269,7 +262,6 @@ const goDetail = (row: any) => {
 };
 
 onMounted(() => {
-  loadHolders();
   load();
 });
 </script>

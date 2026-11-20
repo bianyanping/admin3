@@ -51,7 +51,9 @@ public class DefaultSessionService implements SessionService {
         throw new UserException(CommonResultStatus.UNAUTHORIZED, "账号已过期，请联系管理员开通权限");
       }
       String token = UUID.randomUUID().toString().replace("-", "");
-      UserinfoDTO userinfo = new UserinfoDTO(token, user.getId(), user.getUsername(), user.getAvatar(), user.getIntro(), new UserinfoDTO.Credential(credential.getIdentifier(), credential.getIdentityType()), user.findPermissions());
+      UserinfoDTO userinfo = new UserinfoDTO(token, user.getId(),
+        user.getOrganization() == null ? null : user.getOrganization().getId(),
+        user.getUsername(), user.getAvatar(), user.getIntro(), new UserinfoDTO.Credential(credential.getIdentifier(), credential.getIdentityType()), user.findPermissions());
       sessionManager.store(token, credential, userinfo);
       SessionItemHolder.setItem(Constants.SESSION_CURRENT_USER, userinfo);
       DomainEventPublisher.instance().publish(new UserLoggedIn(userinfo, getClientIP()));

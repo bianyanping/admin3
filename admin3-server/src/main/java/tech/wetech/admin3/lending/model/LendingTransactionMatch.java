@@ -4,32 +4,33 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.Comment;
-import tech.wetech.admin3.sys.model.BaseEntity;
+import tech.wetech.admin3.common.scope.OrgOwnedEntity;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
- * 网贷命中记录：一笔流水最多命中一条（唯一约束 transactionId），
+ * 网贷命中记录：同一组织内一笔流水最多命中一条（唯一约束 org_id + transactionId），
  * 保存命中的平台、关键词与流水快照，便于统计明细追溯。
  *
- * <p>该表是派生数据，可由「重新匹配」整表重建，不对流水表做任何修改。
+ * <p>该表是派生数据，可由「重新匹配」按组织重建，不对流水表做任何修改。
  */
 @Entity
 @Getter
 @Setter
 @Table(name = "lending_transaction_match",
-  uniqueConstraints = @UniqueConstraint(name = "uk_lending_match_tx", columnNames = {"transactionId"}),
+  uniqueConstraints = @UniqueConstraint(name = "uk_lending_match_org_tx", columnNames = {"org_id", "transactionId"}),
   indexes = {
     @Index(name = "idx_lending_match_month", columnList = "transMonth"),
     @Index(name = "idx_lending_match_platform", columnList = "platformId"),
     @Index(name = "idx_lending_match_direction", columnList = "direction"),
     @Index(name = "idx_lending_match_statement", columnList = "statementId"),
-    @Index(name = "idx_lending_match_holder", columnList = "accountHolder")
+    @Index(name = "idx_lending_match_holder", columnList = "accountHolder"),
+    @Index(name = "idx_lending_match_org", columnList = "org_id")
   })
-@Comment("网贷命中记录：一笔流水最多一条，保存命中的平台、关键词与流水快照，可整表重建")
-public class LendingTransactionMatch extends BaseEntity {
+@Comment("网贷命中记录：按组织沉淀，一笔流水在每个组织最多一条，可整表重建")
+public class LendingTransactionMatch extends OrgOwnedEntity {
 
   @Comment("银行流水明细 id（bank_statement_transaction.id）")
   @Column(nullable = false)

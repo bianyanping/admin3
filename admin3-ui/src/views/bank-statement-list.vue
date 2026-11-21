@@ -141,7 +141,7 @@
     </div>
 
     <!-- 上传弹窗 -->
-    <el-dialog title="上传银行流水（PDF / Excel）" v-model="uploadVisible" width="min(520px, 92vw)">
+    <el-dialog title="上传银行流水（PDF / Excel / 图片）" v-model="uploadVisible" width="min(520px, 92vw)">
       <el-form label-width="90px">
         <el-form-item label="银行">
           <el-select v-model="uploadForm.bankCode" placeholder="可自动识别；识别不到时会提示手动选择" clearable style="width: 100%">
@@ -150,7 +150,7 @@
         </el-form-item>
         <el-form-item label="模板">
           <el-button link type="primary" :icon="Download" :loading="templateDownloading" @click="downloadTemplate">下载导入模板</el-button>
-          <span style="color:#909399;font-size:12px;margin-left:8px">按模板表头填写后上传，支持 PDF / Excel(.xlsx)</span>
+          <span style="color:#909399;font-size:12px;margin-left:8px">按模板表头填写后上传，支持 PDF / Excel(.xlsx) / 图片</span>
         </el-form-item>
         <el-form-item label="流水文件">
           <el-upload
@@ -159,16 +159,16 @@
             multiple
             :auto-upload="false"
             :limit="20"
-            accept=".pdf,.xlsx"
+            accept=".pdf,.xlsx,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
             :disabled="uploading"
             :on-change="handleFileChange"
             :on-remove="handleFileRemove"
             :on-exceed="handleExceed"
           >
             <el-icon class="el-icon--upload"><upload-filled /></el-icon>
-            <div class="el-upload__text">将 PDF / Excel 拖到此处，或<em>点击选择</em></div>
+            <div class="el-upload__text">将 PDF / Excel / 图片拖到此处，或<em>点击选择</em></div>
             <template #tip>
-              <div class="el-upload__tip">可一次选择多个文件（最多 20 个），支持 PDF 与 Excel(.xlsx)，系统自动判断原生 / 扫描件 / Excel 表头</div>
+              <div class="el-upload__tip">可一次选择多个文件（最多 20 个），支持 PDF、Excel(.xlsx) 与图片（jpg/png/bmp/tif），系统自动判断原生 / 扫描件 / 图片 / Excel 表头</div>
             </template>
           </el-upload>
         </el-form-item>
@@ -347,12 +347,13 @@ const downloadTemplate = () => {
 
 const isStatementFile = (f: any) => {
   const name = (f.name || '').toLowerCase();
-  return name.endsWith('.pdf') || name.endsWith('.xlsx');
+  if (name.endsWith('.pdf') || name.endsWith('.xlsx')) return true;
+  return ['.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff'].some(ext => name.endsWith(ext));
 };
 
 const handleFileChange = (file: any, files: any[]) => {
   if (!isStatementFile(file)) {
-    ElMessage.error(`仅支持 PDF / Excel(.xlsx) 文件：${file.name}`);
+    ElMessage.error(`仅支持 PDF / Excel(.xlsx) / 图片（jpg/png/bmp/tif）文件：${file.name}`);
     uploadRef.value?.handleRemove(file);
     return;
   }
@@ -381,6 +382,7 @@ const submitUpload = async () => {
   uploadTotal.value = files.length;
   uploadIndex.value = 0;
   const okLines: string[] = [];
+  const mergeLines: string[] = [];
   const skipLines: string[] = [];
   const failLines: string[] = [];
   const warningLines: string[] = [];
@@ -398,9 +400,9 @@ const submitUpload = async () => {
       const r = res.data;
       const title = `${r.bankName || ''} ${r.accountHolder || ''}`.trim();
       if (r.duplicated) {
-        skipLines.push(`${file.name}：该账期已存在，未重复入库`);
+        skipLines.push(`${file.name}：该账期已存在且内容相同，未重复入库`);
       } else if (r.merged) {
-        skipLines.push(`${file.name}：账期重叠，已与同账号流水合并去重（${r.transactionCount} 笔）`);
+        mergeLines.push(`${file.name}：已合并到同账号流水并去重（共 ${r.transactionCount} 笔）`);
       } else {
         okLines.push(`${file.name}：${title}，共 ${r.transactionCount} 笔`);
       }
@@ -419,12 +421,20 @@ const submitUpload = async () => {
   uploadCurrentName.value = '';
 
   const single = files.length === 1;
-  const successCount = okLines.length + skipLines.length;
+  const successCount = okLines.length + mergeLines.length + skipLines.length;
   if (single && failLines.length === 0 && warningLines.length === 0) {
-    ElMessage.success(skipLines.length ? skipLines[0].replace(/^[^：]*：/, '') : `解析成功：${okLines[0].replace(/^[^：]*：/, '')}`);
+    const line = mergeLines[0] || skipLines[0] || okLines[0];
+    if (mergeLines.length) {
+      ElMessage.success(line.replace(/^[^：]*：/, ''));
+    } else if (skipLines.length) {
+      ElMessage.warning(line.replace(/^[^：]*：/, ''));
+    } else {
+      ElMessage.success(`解析成功：${line.replace(/^[^：]*：/, '')}`);
+    }
   } else {
     const blocks: string[] = [];
-    if (okLines.length) blocks.push(`<b>成功 ${okLines.length} 个</b><br>${okLines.join('<br>')}`);
+    if (okLines.length) blocks.push(`<b>成功新增 ${okLines.length} 个</b><br>${okLines.join('<br>')}`);
+    if (mergeLines.length) blocks.push(`<b>合并 ${mergeLines.length} 个</b><br>${mergeLines.join('<br>')}`);
     if (skipLines.length) blocks.push(`<b>跳过 ${skipLines.length} 个</b><br>${skipLines.join('<br>')}`);
     if (failLines.length) blocks.push(`<b style="color:#f56c6c">失败 ${failLines.length} 个</b><br>${failLines.join('<br>')}`);
     if (warningLines.length) blocks.push(`<b style="color:#e6a23c">校验提示</b><br>${warningLines.join('<br>')}`);

@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Configuration;
 import tech.wetech.admin3.ocrApi.BankStatementParserFacade;
 import tech.wetech.admin3.ocrApi.layout.config.CmbLayout;
 import tech.wetech.admin3.ocrApi.registry.ParserRegistry;
+import tech.wetech.admin3.ocrApi.strategy.AbcHxTableStatementParser;
 import tech.wetech.admin3.ocrApi.strategy.BankStatementParserStrategy;
 import tech.wetech.admin3.ocrApi.strategy.ConfigurableStatementParser;
 import tech.wetech.admin3.ocrApi.strategy.GlgmczyhTableStatementParser;
@@ -34,6 +35,12 @@ public class ParserConfig {
   @Bean
   public BankStatementParserStrategy glgmczyhParser() {
     return new GlgmczyhTableStatementParser();
+  }
+
+  /** 农行「对公交易明细清单」扫描件/图片（OCR 表格） */
+  @Bean
+  public BankStatementParserStrategy abcHxTableParser() {
+    return new AbcHxTableStatementParser();
   }
 
   @Bean

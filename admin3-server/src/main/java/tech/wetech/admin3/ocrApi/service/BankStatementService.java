@@ -11,6 +11,7 @@ import tech.wetech.admin3.ocrApi.model.BankStatementTransaction;
 import tech.wetech.admin3.ocrApi.repository.BankStatementRepository;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -33,14 +34,16 @@ public class BankStatementService {
   public BankStatement importStatement(String bankCode, BankStatementDTO dto,
                                        String sourceFileName, String sourceFileKey,
                                        Long orgId, String orgName) {
-    // ========== 判重：同一银行+账号+起止日期 = 同一份流水 ==========
+    // ========== 同一银行+账号+起止日期：可能是同一份流水的另一页 ==========
     StatementHeader header = dto.getHeader();
     Optional<BankStatement> existing = findExisting(bankCode, header);
     if (existing.isPresent()) {
-      System.out.println("  [判重跳过] " + bankCode + " 账号=" + existing.get().getAccountNo()
+      // 不直接跳过：按交易指纹合并，重复页不新增，不同页补齐明细
+      BankStatement merged = mergeInto(existing.get(), dto);
+      System.out.println("  [同账期合并] " + bankCode + " 账号=" + merged.getAccountNo()
         + " 日期=" + header.getStartDate() + "~" + header.getEndDate()
-        + " 已存在（id=" + existing.get().getId() + "）");
-      return existing.get();
+        + " 合并到 id=" + merged.getId() + "，明细总数=" + merged.getTransactionCount());
+      return merged;
     }
 
     // ========== 跨期合并：同银行 + 同账号 + 账期有重叠 ==========
@@ -93,6 +96,14 @@ public class BankStatementService {
   @Transactional(readOnly = true)
   public boolean existsSameStatement(String bankCode, StatementHeader header) {
     return findExisting(bankCode, header).isPresent();
+  }
+
+  /**
+   * 同银行 + 同账号 + 同起止日期的已有流水单（可能是同一份流水的另一页）。
+   */
+  @Transactional(readOnly = true)
+  public Optional<BankStatement> findSameStatement(String bankCode, StatementHeader header) {
+    return findExisting(bankCode, header);
   }
 
   /**
@@ -161,8 +172,73 @@ public class BankStatementService {
     }
 
     target.setTransactionCount(target.getTransactions().size());
+    // 每页解析时序号都从 1 开始，合并后必须按交易日期/时间重排，否则序号重复
+    renumberByDateTime(target);
     recalcTotals(target);
     return bankStatementRepository.save(target);
+  }
+
+  /**
+   * 按交易日期、交易时间、id 重排序号（1..N）。
+   * 合并多页后各页序号都从 1 开始，依赖本方法保证序号唯一且与日期顺序一致。
+   */
+  private void renumberByDateTime(BankStatement statement) {
+    List<BankStatementTransaction> list = new ArrayList<>(statement.getTransactions());
+    list.sort(BankStatementService::compareTransaction);
+    for (int i = 0; i < list.size(); i++) {
+      list.get(i).setSeqNo(i + 1);
+    }
+  }
+
+  private static int compareTransaction(BankStatementTransaction a, BankStatementTransaction b) {
+    int c = compareNullable(a.getTransDate(), b.getTransDate());
+    if (c != 0) return c;
+    c = compareNullable(a.getTransTime(), b.getTransTime());
+    if (c != 0) return c;
+    c = compareNullable(a.getId(), b.getId());
+    if (c != 0) return c;
+    return compareNullable(a.getSeqNo(), b.getSeqNo());
+  }
+
+  private static <T extends Comparable<T>> int compareNullable(T a, T b) {
+    if (a == null && b == null) return 0;
+    if (a == null) return 1;
+    if (b == null) return -1;
+    return a.compareTo(b);
+  }
+
+  /**
+   * 修复历史数据：只处理序号有重复/缺失的流水单（典型是分页合并后每页从 1 编号）。
+   *
+   * @return 被修复的流水单数量
+   */
+  @Transactional
+  public int renumberDuplicateSeqNo() {
+    int repaired = 0;
+    for (BankStatement statement : bankStatementRepository.findAll()) {
+      List<BankStatementTransaction> list = new ArrayList<>(statement.getTransactions());
+      if (list.size() < 2) {
+        continue;
+      }
+      Set<Integer> seen = new HashSet<>();
+      boolean duplicate = false;
+      for (BankStatementTransaction tx : list) {
+        if (tx.getSeqNo() == null || !seen.add(tx.getSeqNo())) {
+          duplicate = true;
+          break;
+        }
+      }
+      if (!duplicate) {
+        continue;
+      }
+      list.sort(BankStatementService::compareTransaction);
+      for (int i = 0; i < list.size(); i++) {
+        list.get(i).setSeqNo(i + 1);
+      }
+      bankStatementRepository.save(statement);
+      repaired++;
+    }
+    return repaired;
   }
 
   /**

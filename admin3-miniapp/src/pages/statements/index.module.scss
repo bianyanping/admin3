@@ -63,6 +63,33 @@
   white-space: nowrap;
 }
 
+/* 上传按钮（次要操作，描边样式） */
+.uploadBtn {
+  @include button-reset;
+  height: $button-height-md;
+  min-width: 112rpx;
+  padding: 0 $spacing-md;
+  background: $color-bg-card;
+  border: 1rpx solid $color-primary;
+  border-radius: $radius-round;
+  transition: all $transition-base;
+
+  &:active {
+    opacity: 0.9;
+    transform: scale(0.98);
+  }
+}
+
+.uploadBtnDisabled {
+  opacity: 0.6;
+}
+
+.uploadBtnText {
+  font-size: $font-size-sm;
+  color: $color-primary;
+  white-space: nowrap;
+}
+
 /* ===== 银行筛选 ===== */
 .filterRow {
   display: flex;

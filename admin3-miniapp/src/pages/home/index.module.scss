@@ -115,6 +115,43 @@
   color: $color-expense;
 }
 
+/* ===== 快捷入口 ===== */
+.quickEntry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: $spacing-md;
+  padding: $spacing-lg;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  box-shadow: $shadow-card;
+}
+
+.quickLeft {
+  flex: 1;
+  min-width: 0;
+}
+
+.quickTitle {
+  display: block;
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.quickDesc {
+  display: block;
+  margin-top: 6rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.quickArrow {
+  margin-left: $spacing-sm;
+  font-size: $font-size-xl;
+  color: $color-text-disabled;
+}
+
 /* ===== 通用卡片 ===== */
 .card {
   margin-top: $spacing-md;

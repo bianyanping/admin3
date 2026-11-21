@@ -23,6 +23,15 @@ server:
   servlet:
     context-path: /admin3
 
+admin3:
+  ocr:
+    # 扫描件识别提供方：table=表格文字识别V2；doc-parser=文档解析（Unlimited-OCR）
+    provider: doc-parser
+    # doc-parser 原始解析结果存档目录，留空则不存档
+    archive-dir: /opt/admin3/files/ocr-raw
+    # 同一份 PDF 已有存档时直接复用，不再调用 OCR（forceOcr=true 时强制重新识别）
+    reuse-cache: true
+
 logging:
   level:
     root: info

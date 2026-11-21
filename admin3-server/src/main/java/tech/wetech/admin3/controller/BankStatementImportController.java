@@ -15,8 +15,9 @@ import java.io.IOException;
 /**
  * 银行流水文件上传导入接口。
  *
- * <p>支持 PDF 与 Excel(.xlsx)：
+ * <p>支持 PDF、Excel(.xlsx) 与图片（jpg/jpeg/png/bmp/tif/tiff）：
  * PDF 自动判断原生文本层还是扫描件（扫描件先走百度 OCR）；
+ * 图片统一转成单页 PDF 后走 OCR；
  * Excel 自动识别表头行与列名，最终统一走同一套校验与入库逻辑。
  */
 @SecurityRequirement(name = "bearerAuth")
@@ -31,11 +32,11 @@ public class BankStatementImportController {
   }
 
   /**
-   * 上传流水文件（PDF / Excel）并解析入库。
+   * 上传流水文件（PDF / Excel / 图片）并解析入库。
    *
-   * @param file     银行流水 PDF 或 Excel(.xlsx)
+   * @param file     银行流水 PDF、Excel(.xlsx) 或图片（jpg/jpeg/png/bmp/tif/tiff）
    * @param bankCode 可选，银行编码（ICBC/PSBC/GXRCB/ABCHX/CCB/GLGMCZYH/GLYH/WECHAT），不传则自动识别
-   * @param forceOcr 可选，true 时强制走 OCR（仅 PDF 有效，默认 false 自动判断）
+   * @param forceOcr 可选，true 时强制走 OCR（PDF / 图片有效，默认 false 自动判断）
    */
   @PostMapping(path = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
   public ResponseEntity<StatementImportService.ImportResult> importStatement(

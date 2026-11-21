@@ -31,14 +31,14 @@
           <div class="stat-card">
             <div class="stat-label">总入账</div>
             <div class="stat-value income">{{ formatMoney(analysis.totalIncome) }}</div>
-            <div class="stat-sub">全部账户收入合计</div>
+            <div class="stat-sub">共 {{ analysis.incomeCount }} 笔 · 全部账户收入合计</div>
           </div>
         </el-col>
         <el-col :xs="12" :sm="12" :md="6">
           <div class="stat-card">
             <div class="stat-label">总出款</div>
             <div class="stat-value expense">{{ formatMoney(analysis.totalExpense) }}</div>
-            <div class="stat-sub">全部账户支出合计</div>
+            <div class="stat-sub">共 {{ analysis.expenseCount }} 笔 · 全部账户支出合计</div>
           </div>
         </el-col>
         <el-col :xs="12" :sm="12" :md="6">
@@ -918,6 +918,8 @@ interface HolderAnalysis {
   statementCount: number;
   accountCount: number;
   transactionCount: number;
+  incomeCount: number;
+  expenseCount: number;
   totalIncome: number;
   totalExpense: number;
   netAmount: number;

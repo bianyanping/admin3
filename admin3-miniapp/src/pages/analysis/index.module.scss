@@ -1,0 +1,503 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  padding-bottom: $spacing-xl;
+  background: $gradient-page;
+}
+
+/* ===== 顶部渐变头 + 户名选择 ===== */
+.header {
+  padding: $spacing-lg $page-padding $spacing-xl;
+  background: $gradient-header;
+  border-bottom-left-radius: $radius-xl;
+  border-bottom-right-radius: $radius-xl;
+}
+
+.headerTitle {
+  display: block;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-semibold;
+  color: $color-text-white;
+}
+
+.headerSub {
+  display: block;
+  margin-top: 8rpx;
+  font-size: $font-size-sm;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.holderPicker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: $spacing-md;
+  padding: 18rpx $spacing-md;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: $radius-md;
+}
+
+.holderName {
+  flex: 1;
+  min-width: 0;
+  font-size: $font-size-md;
+  color: $color-text-white;
+  @include text-ellipsis;
+}
+
+.holderArrow {
+  margin-left: $spacing-sm;
+  font-size: $font-size-sm;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* ===== 内容区 ===== */
+.body {
+  padding: $spacing-md $page-padding 0;
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  margin-bottom: $spacing-md;
+}
+
+.metaText {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.statRow {
+  display: flex;
+  gap: $spacing-md;
+}
+
+.statCard {
+  flex: 1;
+  min-width: 0;
+  padding: $spacing-md;
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+}
+
+.statLabel {
+  display: block;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.statIncome {
+  display: block;
+  margin-top: 8rpx;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-income;
+  word-break: break-all;
+}
+
+.statExpense {
+  display: block;
+  margin-top: 8rpx;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-expense;
+  word-break: break-all;
+}
+
+.statSub {
+  display: block;
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.netCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: $spacing-md;
+  padding: $spacing-md;
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+}
+
+.card {
+  margin-top: $spacing-md;
+  padding: $spacing-md;
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $spacing-sm;
+}
+
+.cardTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.cardSub {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+/* ===== 月度收支 ===== */
+.monthItem {
+  padding: $spacing-sm 0;
+  border-bottom: 1rpx solid $color-divider;
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.monthHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8rpx;
+}
+
+.monthName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.monthCount {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.monthGrid {
+  display: flex;
+  gap: $spacing-md;
+}
+
+.monthCell {
+  flex: 1;
+  min-width: 0;
+}
+
+.cellLabel {
+  display: block;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.cellIncome {
+  display: block;
+  margin-top: 4rpx;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-income;
+  word-break: break-all;
+}
+
+.cellExpense {
+  display: block;
+  margin-top: 4rpx;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-expense;
+  word-break: break-all;
+}
+
+.monthNet {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8rpx;
+}
+
+.monthNet .cellLabel,
+.monthNet .cellIncome,
+.monthNet .cellExpense {
+  display: inline-block;
+  margin-top: 0;
+  font-size: $font-size-xs;
+}
+
+/* ===== 账户概览 ===== */
+.accountItem {
+  padding: $spacing-sm 0;
+  border-bottom: 1rpx solid $color-divider;
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.accountHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.accountBank {
+  flex: 1;
+  min-width: 0;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.accountNo {
+  margin-left: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.accountMeta {
+  display: block;
+  margin-top: 6rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.accountFlow {
+  display: flex;
+  gap: $spacing-lg;
+  margin-top: 6rpx;
+}
+
+.accountFlow .cellIncome,
+.accountFlow .cellExpense {
+  display: inline-block;
+  margin-top: 0;
+}
+
+/* ===== 余额概览展开明细 ===== */
+.balanceGrid {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 8rpx;
+}
+
+.balanceCell {
+  width: 50%;
+  padding: 6rpx 0;
+  box-sizing: border-box;
+
+  &:nth-child(odd) {
+    padding-right: $spacing-sm;
+  }
+}
+
+.balanceValue {
+  display: block;
+  margin-top: 2rpx;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  word-break: break-all;
+}
+
+.expandToggle {
+  margin-top: 8rpx;
+  text-align: right;
+}
+
+.expandToggleText {
+  font-size: $font-size-xs;
+  color: $color-primary;
+}
+
+.accountExpand {
+  margin-top: $spacing-sm;
+  padding: $spacing-sm;
+  background: $color-bg-hover;
+  border-radius: $radius-sm;
+}
+
+.expandBlock + .expandBlock {
+  margin-top: $spacing-sm;
+}
+
+.expandTitle {
+  display: block;
+  margin-bottom: 4rpx;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  color: $color-text-secondary;
+}
+
+.expandText {
+  display: block;
+  font-size: $font-size-xs;
+  line-height: 1.6;
+  color: $color-text-tertiary;
+  word-break: break-all;
+}
+
+.interestItem {
+  display: flex;
+  align-items: center;
+  padding: 6rpx 0;
+  border-top: 1rpx solid $color-border;
+}
+
+.interestDate {
+  flex: none;
+  width: 150rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.interestName {
+  flex: 1;
+  min-width: 0;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  @include text-ellipsis;
+}
+
+.interestAmountIncome {
+  flex: none;
+  margin-left: $spacing-xs;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  color: $color-income;
+}
+
+.interestAmountExpense {
+  flex: none;
+  margin-left: $spacing-xs;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  color: $color-expense;
+}
+
+/* ===== 往来对手 ===== */
+.cpStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-md;
+  padding-bottom: $spacing-xs;
+}
+
+.cpStat {
+  flex: 1;
+  min-width: 40%;
+}
+
+.cpValue {
+  display: block;
+  margin-top: 4rpx;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.cpMeta {
+  display: block;
+  margin: 4rpx 0 $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.cpItem {
+  padding: $spacing-sm 0;
+  border-bottom: 1rpx solid $color-divider;
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.cpHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cpName {
+  flex: 1;
+  min-width: 0;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.cpTag {
+  flex: none;
+  margin-left: $spacing-xs;
+  padding: 2rpx 10rpx;
+  font-size: 20rpx;
+  color: $color-warning;
+  background: rgba(255, 125, 0, 0.12);
+  border-radius: $radius-xs;
+}
+
+.cpFlow {
+  display: flex;
+  gap: $spacing-md;
+  margin-top: 6rpx;
+}
+
+.cpCell {
+  flex: 1;
+  min-width: 0;
+}
+
+.cpCount {
+  display: block;
+  margin-top: 2rpx;
+  font-size: 20rpx;
+  color: $color-text-tertiary;
+}
+
+.cpFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6rpx;
+}
+
+.cpFootText {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.cpToggle {
+  padding-top: $spacing-sm;
+  text-align: center;
+}
+
+.cpToggleText {
+  font-size: $font-size-xs;
+  color: $color-primary;
+}
+
+.cpEmpty {
+  display: block;
+  padding: $spacing-md 0;
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+/* ===== 状态 ===== */
+.placeholder {
+  padding-top: $spacing-xl;
+}
+
+.loading {
+  display: block;
+  margin-top: $spacing-md;
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}

@@ -2,6 +2,11 @@ package tech.wetech.admin3.ocrApi.service;
 
 import com.baidu.aip.ocr.AipOcr;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.graphics.image.JPEGFactory;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.rendering.ImageType;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -9,6 +14,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import tech.wetech.admin3.DTO.BankStatementDTO;
@@ -21,6 +27,8 @@ import tech.wetech.admin3.common.Constants;
 import tech.wetech.admin3.common.SessionItemHolder;
 import tech.wetech.admin3.ocrApi.BankStatementParserFacade;
 import tech.wetech.admin3.ocrApi.BaiduOcr;
+import tech.wetech.admin3.ocrApi.DocParserOcrAdapter;
+import tech.wetech.admin3.ocrApi.DocParserOcrClient;
 import tech.wetech.admin3.ocrApi.model.BankStatement;
 import tech.wetech.admin3.ocrApi.parser.AbcHxNativePdfParser;
 import tech.wetech.admin3.ocrApi.parser.CcbNativePdfParser;
@@ -38,19 +46,31 @@ import tech.wetech.admin3.sys.service.dto.StorageFileDTO;
 import tech.wetech.admin3.sys.service.dto.UserinfoDTO;
 
 import javax.imageio.ImageIO;
+import java.awt.Color;
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
@@ -71,6 +91,18 @@ public class StatementImportService {
 
   private static final Logger log = LoggerFactory.getLogger(StatementImportService.class);
 
+  /** 扫描件 OCR 提供方：table=表格文字识别V2；doc-parser=文档解析（Unlimited-OCR） */
+  @Value("${admin3.ocr.provider:table}")
+  private String ocrProvider;
+
+  /** doc-parser 原始解析结果存档目录；留空表示不存档 */
+  @Value("${admin3.ocr.archive-dir:}")
+  private String ocrArchiveDir;
+
+  /** 同一份 PDF 已存档解析结果时是否直接复用（不再调用 OCR）；forceOcr=true 时跳过复用 */
+  @Value("${admin3.ocr.reuse-cache:true}")
+  private boolean ocrReuseCache;
+
   /** 原生 PDF 中小于此字符数视为扫描件 */
   private static final int MIN_TEXT_CHARS = 60;
   /** 原生 PDF 每页平均字符数下限 */
@@ -79,6 +111,10 @@ public class StatementImportService {
   private static final int OCR_DPI = 300;
 
   private static final Pattern DATE = Pattern.compile("\\d{4}[-年]\\d{1,2}[-月]\\d{1,2}");
+
+  /** 支持的图片扩展名（JDK 自带 ImageIO 可解码的常见格式） */
+  private static final List<String> IMAGE_EXTENSIONS =
+    List.of(".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff");
 
   /** 银行编码 → 展示名称（Excel 表头未写银行全称时补全） */
   private static final Map<String, String> BANK_NAMES = Map.of(
@@ -141,9 +177,9 @@ public class StatementImportService {
   /**
    * 解析上传的流水文件并入库。
    *
-   * @param file       上传的 PDF 或 Excel(.xlsx)
+   * @param file       上传的 PDF、Excel(.xlsx) 或图片（jpg/jpeg/png/bmp/tif/tiff）
    * @param bankCode   银行编码（可选，传了就不再自动识别）
-   * @param forceOcr   true=强制走 OCR（仅 PDF 有效）
+   * @param forceOcr   true=强制走 OCR（仅 PDF / 图片有效）
    */
   public ImportResult importStatement(MultipartFile file, String bankCode, boolean forceOcr) throws IOException {
     if (file == null || file.isEmpty()) {
@@ -152,38 +188,49 @@ public class StatementImportService {
     String fileName = file.getOriginalFilename();
     String lowerName = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
     boolean excel = lowerName.endsWith(".xlsx");
-    if (!excel && !lowerName.endsWith(".pdf")) {
+    boolean image = IMAGE_EXTENSIONS.stream().anyMatch(lowerName::endsWith);
+    if (!excel && !image && !lowerName.endsWith(".pdf")) {
       throw new BusinessException(CommonResultStatus.PARAM_ERROR,
-        "仅支持 PDF 或 Excel(.xlsx) 文件，当前文件：" + fileName);
+        "仅支持 PDF、Excel(.xlsx) 或图片（jpg/jpeg/png/bmp/tif/tiff）文件，当前文件：" + fileName);
     }
     if (excel) {
       return importExcel(file, bankCode);
     }
-    byte[] pdfBytes = file.getBytes();
 
-    String pdfText;
-    int pageCount;
-    try (PDDocument doc = PDDocument.load(pdfBytes)) {
-      pageCount = doc.getNumberOfPages();
-      PDFTextStripper stripper = new PDFTextStripper();
-      stripper.setSortByPosition(true);
-      pdfText = stripper.getText(doc);
-    } catch (IOException e) {
-      throw new BusinessException(CommonResultStatus.PARAM_ERROR,
-        "PDF 读取失败（可能已加密或损坏）：" + e.getMessage());
+    byte[] fileBytes = file.getBytes();
+    // 图片没有文本层：先归一化成单页 PDF，复用「扫描件 → OCR」链路；
+    // 入库仍保存原始图片，OCR 提交时用 .pdf 文件名（文档解析按扩展名判断文件类型）
+    byte[] pdfBytes = image ? imageToPdf(fileBytes) : fileBytes;
+    String ocrFileName = image ? stripExtension(fileName) + ".pdf" : fileName;
+    // 图片转 PDF 时 PDFBox 会写入运行时元数据，同一张图两次转换字节不一致，
+    // 因此图片的解析结果缓存键取原始文件内容哈希
+    String cacheKey = image ? sha256Hex(fileBytes) : null;
+
+    String pdfText = "";
+    int pageCount = 1;
+    if (!image) {
+      try (PDDocument doc = PDDocument.load(pdfBytes)) {
+        pageCount = doc.getNumberOfPages();
+        PDFTextStripper stripper = new PDFTextStripper();
+        stripper.setSortByPosition(true);
+        pdfText = stripper.getText(doc);
+      } catch (IOException e) {
+        throw new BusinessException(CommonResultStatus.PARAM_ERROR,
+          "PDF 读取失败（可能已加密或损坏）：" + e.getMessage());
+      }
     }
 
     if (isCreditReport(pdfText, fileName)) {
-      throw new BusinessException(CommonResultStatus.FAIL, "征信报告解析暂未开放，请上传银行流水 PDF");
+      throw new BusinessException(CommonResultStatus.FAIL, "征信报告解析暂未开放，请上传银行流水文件");
     }
 
     String code = detectBankCode(bankCode, headerTextOf(pdfText), fileName);
-    boolean needOcr = forceOcr || looksScanned(pdfText, pageCount);
+    boolean needOcr = image || forceOcr || looksScanned(pdfText, pageCount);
 
     BankStatementDTO dto;
     String mode;
     if (needOcr) {
-      JSONArray pages = ocrPages(pdfBytes);
+      JSONArray pages = ocrPages(pdfBytes, ocrFileName, forceOcr, cacheKey);
       // OCR 词序更接近页面版式，用它重新识别一次银行，识别不到再沿用文本层结果
       String ocrCode = detectBankCode(null, joinOcrWords(pages), fileName);
       if (ocrCode != null) {
@@ -191,11 +238,11 @@ public class StatementImportService {
       }
       if (code == null) {
         throw new BusinessException(CommonResultStatus.FAIL,
-          "该 PDF 未包含银行名称，无法自动识别，请在上传时手动选择银行（ICBC/PSBC/GXRCB/ABCHX/GLGMCZYH/WECHAT）");
+          "该文件未包含银行名称，无法自动识别，请在上传时手动选择银行（ICBC/PSBC/GXRCB/ABCHX/GLGMCZYH/WECHAT）");
       }
       dto = parseOcrPages(code, pages, fileName);
       mode = "OCR";
-      log.info("上传文件 {} 判定为扫描件，OCR 解析，银行={}", fileName, code);
+      log.info("上传文件 {} 判定为扫描件或图片，OCR 解析，银行={}", fileName, code);
     } else {
       if (code == null) {
         throw new BusinessException(CommonResultStatus.FAIL,
@@ -206,7 +253,8 @@ public class StatementImportService {
       log.info("上传文件 {} 判定为原生 PDF，银行={}", fileName, code);
     }
 
-    return persist(mode, code, dto, pdfBytes, file);
+    // 入库保存用户上传的原始文件（图片存图片，PDF 存 PDF）
+    return persist(mode, code, dto, fileBytes, file);
   }
 
   /**
@@ -265,11 +313,14 @@ public class StatementImportService {
     // 入库前做一致性校验：余额勾稽 + 汇总对账，识别错漏在此暴露
     List<String> warnings = validateStatement(dto);
 
-    boolean duplicated = bankStatementService.existsSameStatement(code, dto.getHeader());
-    // 需在入库前判断：入库时若有重叠账期会直接合并进已有流水单
-    boolean merged = !duplicated && bankStatementService.hasOverlappingStatement(code, dto.getHeader());
+    // 同账号同账期可能是同一份流水的另一页：按交易指纹合并，而不是判重跳过
+    Optional<BankStatement> sameStatement = bankStatementService.findSameStatement(code, dto.getHeader());
+    int beforeCount = sameStatement.map(s -> s.getTransactionCount() == null ? 0 : s.getTransactionCount())
+      .orElse(0);
+    boolean overlapping = sameStatement.isEmpty()
+      && bankStatementService.hasOverlappingStatement(code, dto.getHeader());
     String sourceKey = null;
-    if (!duplicated && !merged) {
+    if (sameStatement.isEmpty() && !overlapping) {
       StorageFileDTO stored = storageService.store(
         null, new java.io.ByteArrayInputStream(fileBytes), file.getSize(), file.getContentType(), fileName);
       sourceKey = stored.getKey();
@@ -284,6 +335,11 @@ public class StatementImportService {
       }
     }
     BankStatement saved = bankStatementService.importStatement(code, dto, fileName, sourceKey, orgId, orgName);
+    int afterCount = saved.getTransactionCount() == null ? transactions.size() : saved.getTransactionCount();
+    int added = Math.max(0, afterCount - beforeCount);
+    // 同一页重复上传：无新增明细；不同页：合并成功并新增明细
+    boolean duplicated = sameStatement.isPresent() && added == 0;
+    boolean merged = overlapping || (sameStatement.isPresent() && added > 0);
 
     StatementSummary summary = dto.getSummary();
     return new ImportResult(
@@ -564,7 +620,168 @@ public class StatementImportService {
 
   // ==================== 扫描件 OCR ====================
 
-  private JSONArray ocrPages(byte[] pdfBytes) throws IOException {
+  /**
+   * 图片转单页 A4 PDF：按比例适配页面，图片像素不被裁剪。
+   *
+   * <p>固定文档创建/修改时间，保证同一张图片每次转换出的 PDF 字节完全一致，
+   * 这样「按内容哈希复用解析结果」的缓存在图片上传时也能命中。
+   */
+  private static byte[] imageToPdf(byte[] imageBytes) throws IOException {
+    BufferedImage source = ImageIO.read(new ByteArrayInputStream(imageBytes));
+    if (source == null) {
+      throw new BusinessException(CommonResultStatus.PARAM_ERROR,
+        "图片无法识别，请改用 JPG / PNG / BMP / TIF 格式");
+    }
+    BufferedImage rgb = toRgb(source);
+    try (PDDocument doc = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+      Calendar fixed = Calendar.getInstance();
+      fixed.setTimeInMillis(0L);
+      doc.getDocumentInformation().setCreationDate(fixed);
+      doc.getDocumentInformation().setModificationDate(fixed);
+
+      boolean landscape = rgb.getWidth() > rgb.getHeight();
+      PDRectangle size = landscape
+        ? new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth())
+        : new PDRectangle(PDRectangle.A4.getWidth(), PDRectangle.A4.getHeight());
+      PDPage page = new PDPage(size);
+      doc.addPage(page);
+
+      float scale = Math.min(size.getWidth() / rgb.getWidth(), size.getHeight() / rgb.getHeight());
+      float w = rgb.getWidth() * scale;
+      float h = rgb.getHeight() * scale;
+      float x = (size.getWidth() - w) / 2;
+      float y = (size.getHeight() - h) / 2;
+
+      // 0.92 质量：OCR 足够清晰，同时避免高分辨率扫描件生成的 PDF 过大
+      PDImageXObject pdImage = JPEGFactory.createFromImage(doc, rgb, 0.92f);
+      try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+        cs.drawImage(pdImage, x, y, w, h);
+      }
+      doc.save(out);
+      return out.toByteArray();
+    }
+  }
+
+  /** 统一转成 RGB，透明背景铺白，避免 PNG 透明区域在 JPEG 中变黑影响 OCR。 */
+  private static BufferedImage toRgb(BufferedImage src) {
+    if (src.getType() == BufferedImage.TYPE_INT_RGB && !src.getColorModel().hasAlpha()) {
+      return src;
+    }
+    BufferedImage rgb = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_RGB);
+    Graphics2D g = rgb.createGraphics();
+    g.setColor(Color.WHITE);
+    g.fillRect(0, 0, src.getWidth(), src.getHeight());
+    g.drawImage(src, 0, 0, null);
+    g.dispose();
+    return rgb;
+  }
+
+  private static String stripExtension(String name) {
+    if (name == null || name.isBlank()) return "statement";
+    int dot = name.lastIndexOf('.');
+    return dot > 0 ? name.substring(0, dot) : name;
+  }
+
+  /**
+   * 扫描件识别入口：按配置选择「文档解析（Unlimited-OCR）」或「表格文字识别V2」。
+   * 两条链路输出同一种页面 JSON，下游解析器无需感知。
+   */
+  private JSONArray ocrPages(byte[] pdfBytes, String fileName, boolean forceOcr, String cacheKey) throws IOException {
+    if ("doc-parser".equalsIgnoreCase(ocrProvider)) {
+      return ocrPagesByDocParser(pdfBytes, fileName, forceOcr, cacheKey);
+    }
+    return ocrPagesByTable(pdfBytes);
+  }
+
+  /**
+   * 文档解析（Unlimited-OCR）：整份文件上传，异步任务返回结构化结果后再转成页面 JSON。
+   *
+   * <p>同一份文件（按内容哈希识别；图片取原始文件哈希）已有存档结果时直接复用，
+   * 跳过远端 OCR 调用；存档不存在、不可读或 forceOcr=true 时才重新识别。
+   */
+  private JSONArray ocrPagesByDocParser(byte[] pdfBytes, String fileName, boolean forceOcr, String cacheKey) {
+    String hash = cacheKey != null ? cacheKey : sha256Hex(pdfBytes);
+    JSONObject parsed = forceOcr ? null : readCachedResult(hash);
+    if (parsed != null) {
+      log.info("复用本地文档解析结果，跳过 OCR 调用：{}（{}）", fileName, hash);
+    } else {
+      parsed = DocParserOcrClient.parse(pdfBytes, fileName);
+      archiveRawResult(fileName, parsed, hash);
+    }
+    JSONArray pages = DocParserOcrAdapter.toLegacyPages(parsed);
+    int tables = 0;
+    for (int i = 0; i < pages.length(); i++) {
+      tables += pages.getJSONObject(i).getJSONArray("tables_result").length();
+    }
+    log.info("文档解析完成：{} 页，{} 张表格", pages.length(), tables);
+    if (tables == 0) {
+      log.warn("文档解析未识别到表格，后续解析可能失败，请检查 PDF 版式");
+    }
+    return pages;
+  }
+
+  /**
+   * 读取按内容哈希缓存的解析结果；未开启复用、没有存档或存档不可用时返回 null。
+   */
+  private JSONObject readCachedResult(String hash) {
+    if (!ocrReuseCache || ocrArchiveDir == null || ocrArchiveDir.isBlank()) {
+      return null;
+    }
+    Path file = cacheDir().resolve(hash + ".json");
+    if (!Files.isReadable(file)) {
+      return null;
+    }
+    try {
+      return new JSONObject(Files.readString(file, StandardCharsets.UTF_8));
+    } catch (Exception e) {
+      log.warn("本地文档解析结果不可用，将重新调用 OCR：{}（{}）", e.getMessage(), file);
+      return null;
+    }
+  }
+
+  /**
+   * 存档 doc-parser 的原始解析结果：一份带时间戳的历史文件，一份按内容哈希命名的缓存文件。
+   * 写入失败不影响导入。
+   */
+  private void archiveRawResult(String fileName, JSONObject parsed, String hash) {
+    if (ocrArchiveDir == null || ocrArchiveDir.isBlank() || parsed == null) {
+      return;
+    }
+    try {
+      Path dir = Path.of(ocrArchiveDir);
+      Files.createDirectories(dir);
+      String base = fileName == null || fileName.isBlank() ? "statement" : fileName;
+      base = base.replaceAll("(?i)\\.pdf$", "").replaceAll("[\\\\/:*?\"<>|\\s]", "_");
+      String stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS"));
+      Path history = dir.resolve(base + "-" + stamp + ".json");
+      Files.writeString(history, parsed.toString(2), StandardCharsets.UTF_8);
+
+      Path cache = cacheDir().resolve(hash + ".json");
+      Files.createDirectories(cache.getParent());
+      Files.writeString(cache, parsed.toString(2), StandardCharsets.UTF_8);
+      log.info("文档解析原始结果已存档：{}；缓存：{}", history.toAbsolutePath(), cache.toAbsolutePath());
+    } catch (Exception e) {
+      log.warn("文档解析原始结果存档失败：{}", e.getMessage());
+    }
+  }
+
+  private Path cacheDir() {
+    return Path.of(ocrArchiveDir, "cache");
+  }
+
+  /** 文件内容 SHA-256，用作解析结果缓存键（文件名可重复，内容不会） */
+  private static String sha256Hex(byte[] bytes) {
+    try {
+      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("当前 JVM 不支持 SHA-256", e);
+    }
+  }
+
+  /**
+   * 表格文字识别V2：逐页渲染成图片再识别。
+   */
+  private JSONArray ocrPagesByTable(byte[] pdfBytes) throws IOException {
     AipOcr client = new AipOcr(BaiduOcr.APP_ID, BaiduOcr.API_KEY, BaiduOcr.SECRET_KEY);
     client.setConnectionTimeoutInMillis(10_000);
     client.setSocketTimeoutInMillis(120_000);

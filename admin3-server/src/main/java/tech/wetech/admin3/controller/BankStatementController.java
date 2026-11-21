@@ -416,6 +416,8 @@ public class BankStatementController {
 
     BigDecimal totalIncome = BigDecimal.ZERO;
     BigDecimal totalExpense = BigDecimal.ZERO;
+    long incomeCount = 0;
+    long expenseCount = 0;
     TreeMap<YearMonth, BigDecimal[]> monthly = new TreeMap<>();
     Map<YearMonth, Long> monthlyCount = new HashMap<>();
     for (TxnLite t : txns) {
@@ -423,6 +425,13 @@ public class BankStatementController {
       boolean internal = "其他".equals(t.direction());
       BigDecimal income = internal || amount.signum() < 0 ? BigDecimal.ZERO : amount;
       BigDecimal expense = internal || amount.signum() >= 0 ? BigDecimal.ZERO : amount.abs();
+      if (!internal) {
+        if (amount.signum() < 0) {
+          expenseCount++;
+        } else {
+          incomeCount++;
+        }
+      }
       totalIncome = totalIncome.add(income);
       totalExpense = totalExpense.add(expense);
       if (t.transDate() != null) {
@@ -466,8 +475,8 @@ public class BankStatementController {
       .filter(java.util.Objects::nonNull).max(Comparator.naturalOrder()).orElse(null);
 
     return ResponseEntity.ok(new HolderAnalysis(holder, statements.size(), accounts.size(),
-      txns.size(), totalIncome, totalExpense, totalIncome.subtract(totalExpense),
-      startDate, endDate, accounts, monthlyFlows));
+      txns.size(), incomeCount, expenseCount, totalIncome, totalExpense,
+      totalIncome.subtract(totalExpense), startDate, endDate, accounts, monthlyFlows));
   }
 
   /**
@@ -1179,8 +1188,8 @@ public class BankStatementController {
   }
 
   public record HolderAnalysis(String accountHolder, int statementCount, int accountCount,
-                               long transactionCount, BigDecimal totalIncome,
-                               BigDecimal totalExpense, BigDecimal netAmount,
+                               long transactionCount, long incomeCount, long expenseCount,
+                               BigDecimal totalIncome, BigDecimal totalExpense, BigDecimal netAmount,
                                LocalDate startDate, LocalDate endDate,
                                List<AccountSummary> accounts, List<MonthlyFlow> monthly) {
   }
@@ -1301,7 +1310,8 @@ public class BankStatementController {
       }
       return cb.and(predicates.toArray(new Predicate[0]));
     };
-    Pageable pageable = PageRequest.of(Math.max(page - 1, 0), size, Sort.by(Sort.Direction.ASC, "seqNo"));
+    Pageable pageable = PageRequest.of(Math.max(page - 1, 0), size,
+      Sort.by(Sort.Direction.ASC, "transDate", "transTime", "seqNo", "id"));
     return ResponseEntity.ok(transactionRepository.findAll(spec, pageable));
   }
 
@@ -1317,7 +1327,8 @@ public class BankStatementController {
 
     Specification<BankStatementTransaction> spec = (root, query, cb) ->
       cb.equal(root.get("statement").get("id"), id);
-    List<BankStatementTransaction> list = transactionRepository.findAll(spec, Sort.by(Sort.Direction.ASC, "seqNo"));
+    List<BankStatementTransaction> list = transactionRepository.findAll(spec,
+      Sort.by(Sort.Direction.ASC, "transDate", "transTime", "seqNo", "id"));
 
     StringBuilder sb = new StringBuilder();
     // UTF-8 BOM，避免 Excel 打开乱码

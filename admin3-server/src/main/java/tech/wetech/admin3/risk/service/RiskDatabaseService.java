@@ -3,15 +3,23 @@ package tech.wetech.admin3.risk.service;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 import jakarta.persistence.criteria.Subquery;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import tech.wetech.admin3.common.BusinessException;
+import tech.wetech.admin3.common.CommonResultStatus;
 import tech.wetech.admin3.common.scope.OrgScopeService;
 import tech.wetech.admin3.ocrApi.model.BankStatement;
 import tech.wetech.admin3.ocrApi.model.BankStatementTransaction;
@@ -42,6 +50,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -53,6 +63,8 @@ import java.util.stream.Collectors;
  */
 @Service
 public class RiskDatabaseService {
+
+  private static final Logger log = LoggerFactory.getLogger(RiskDatabaseService.class);
 
   /** 对手沉淀缓存有效期 */
   private static final Duration SYNC_TTL = Duration.ofMinutes(10);
@@ -66,9 +78,11 @@ public class RiskDatabaseService {
   private final CreditReportRepository creditReportRepository;
   private final OrgScopeService orgScope;
   private final TransactionTemplate transactionTemplate;
+  private final JdbcTemplate jdbcTemplate;
 
-  private final Map<Long, LocalDateTime> lastSyncByOrg = new java.util.concurrent.ConcurrentHashMap<>();
-  private final Object syncLock = new Object();
+  private final Map<Long, LocalDateTime> lastSyncByOrg = new ConcurrentHashMap<>();
+  /** 按组织串行化重建，避免同组织并发 delete+insert */
+  private final ConcurrentHashMap<Long, ReentrantLock> orgLocks = new ConcurrentHashMap<>();
 
   public RiskDatabaseService(RiskCounterpartyRepository counterpartyRepository,
                              RiskTagRepository tagRepository,
@@ -78,7 +92,8 @@ public class RiskDatabaseService {
                              BankStatementTransactionRepository transactionRepository,
                              CreditReportRepository creditReportRepository,
                              OrgScopeService orgScope,
-                             PlatformTransactionManager transactionManager) {
+                             PlatformTransactionManager transactionManager,
+                             JdbcTemplate jdbcTemplate) {
     this.counterpartyRepository = counterpartyRepository;
     this.tagRepository = tagRepository;
     this.tagLinkRepository = tagLinkRepository;
@@ -88,9 +103,35 @@ public class RiskDatabaseService {
     this.creditReportRepository = creditReportRepository;
     this.orgScope = orgScope;
     this.transactionTemplate = new TransactionTemplate(transactionManager);
+    this.jdbcTemplate = jdbcTemplate;
   }
 
   // ==================== 预置数据 ====================
+
+  /**
+   * 保证对手名称唯一键使用二进制排序规则。
+   *
+   * <p>应用层已对名称做过 normalize（去空白 + 小写），若数据库继续用默认的 {@code *_ai_ci} 排序规则，
+   * 会把 {@code *a} 与 {@code *ᵃ}、全角与半角等不同名称判定为相等，批量插入时就会撞唯一键。
+   * 只在排序规则不一致时执行一次 ALTER，已正确时直接跳过。
+   */
+  public void ensureSchema() {
+    try {
+      Integer mismatched = jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() "
+          + "AND table_name = 'risk_counterparty' AND column_name = 'name_key' "
+          + "AND (collation_name IS NULL OR collation_name <> 'utf8mb4_bin')", Integer.class);
+      if (mismatched == null || mismatched == 0) {
+        return;
+      }
+      jdbcTemplate.execute("ALTER TABLE risk_counterparty MODIFY name_key VARCHAR(255) "
+        + "CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL");
+      log.info("risk_counterparty.name_key 已切换为 utf8mb4_bin 排序规则");
+    } catch (RuntimeException e) {
+      log.warn("risk_counterparty.name_key 排序规则调整失败：{}", e.getMessage());
+    }
+  }
+
 
   /**
    * 预置标签定义与消费型剔除规则，已存在则跳过。
@@ -199,20 +240,75 @@ public class RiskDatabaseService {
     if (orgId == null) {
       return emptySyncResult();
     }
-    synchronized (syncLock) {
+    ReentrantLock lock = orgLocks.computeIfAbsent(orgId, key -> new ReentrantLock());
+    lock.lock();
+    try {
       LocalDateTime lastSync = lastSyncByOrg.get(orgId);
       if (!force && lastSync != null && !lastSync.plus(SYNC_TTL).isBefore(LocalDateTime.now())
         && counterpartyRepository.countByOrgId(orgId) > 0) {
         return buildSyncResult(orgId);
       }
       return rebuild(orgId);
+    } finally {
+      lock.unlock();
     }
   }
 
+  /**
+   * 重建当前组织的对手沉淀。
+   *
+   * <p>并发保护：JVM 内按组织加锁，跨实例再加 MySQL 命名锁；
+   * 命名锁与事务共用同一个连接，在事务结束（提交/回滚）后释放，避免锁先释放导致其他实例读到中间状态。
+   *
+   * <p>若仍遇到唯一键冲突（并发写入或历史脏数据），整个事务已回滚，重新删旧+插入一次。
+   */
   private SyncResult rebuild(Long orgId) {
-    SyncResult result = transactionTemplate.execute(status -> doRebuild(orgId));
-    lastSyncByOrg.put(orgId, LocalDateTime.now());
-    return result == null ? emptySyncResult() : result;
+    String lockName = "risk:counterparty:org:" + orgId;
+    DataIntegrityViolationException last = null;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      try {
+        SyncResult result = transactionTemplate.execute(status -> {
+          if (!acquireDbLock(lockName, 60)) {
+            throw new BusinessException(CommonResultStatus.FAIL, "交易对手数据正在重建，请稍后重试");
+          }
+          TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+              releaseDbLock(lockName);
+            }
+          });
+          return doRebuild(orgId);
+        });
+        lastSyncByOrg.put(orgId, LocalDateTime.now());
+        return result == null ? emptySyncResult() : result;
+      } catch (DataIntegrityViolationException e) {
+        last = e;
+        try {
+          Thread.sleep(50L * attempt);
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          break;
+        }
+      }
+    }
+    if (last != null) {
+      throw last;
+    }
+    throw new BusinessException(CommonResultStatus.FAIL, "交易对手数据重建失败，请稍后重试");
+  }
+
+  private boolean acquireDbLock(String lockName, int timeoutSeconds) {
+    Integer acquired = jdbcTemplate.queryForObject(
+      "SELECT GET_LOCK(?, ?)", Integer.class, lockName, timeoutSeconds);
+    return acquired != null && acquired == 1;
+  }
+
+  private void releaseDbLock(String lockName) {
+    try {
+      jdbcTemplate.queryForObject("SELECT RELEASE_LOCK(?)", Integer.class, lockName);
+    } catch (RuntimeException ignored) {
+      // 连接关闭时 MySQL 会自动释放命名锁
+    }
   }
 
   private SyncResult doRebuild(Long orgId) {

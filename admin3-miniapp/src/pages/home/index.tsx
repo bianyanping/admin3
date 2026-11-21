@@ -71,6 +71,12 @@ const HomePage: React.FC = () => {
     [stats]
   );
 
+  /** 与 Web 端一致：只有拥有 bankStatement:analysis 权限才显示分析入口（* 为超管） */
+  const canAnalysis = useMemo(() => {
+    const permissions = profile?.permissions || [];
+    return permissions.includes('*') || permissions.includes('bankStatement:analysis');
+  }, [profile]);
+
   const openStatement = (statementId?: string) => {
     if (!statementId) return;
     Taro.navigateTo({ url: `/pages/statement-detail/index?id=${statementId}` });
@@ -128,6 +134,20 @@ const HomePage: React.FC = () => {
             <Text className={styles.summaryExpense}>{formatMoney(stats?.totalExpense)}</Text>
           </View>
         </View>
+
+        {/* 快捷入口：流水单分析 */}
+        {canAnalysis ? (
+          <View
+            className={styles.quickEntry}
+            onClick={() => Taro.navigateTo({ url: '/pages/analysis/index' })}
+          >
+            <View className={styles.quickLeft}>
+              <Text className={styles.quickTitle}>流水单分析</Text>
+              <Text className={styles.quickDesc}>按户名查看总入账/出款与每月收支</Text>
+            </View>
+            <Text className={styles.quickArrow}>›</Text>
+          </View>
+        ) : null}
 
         {/* 收支趋势 */}
         <View className={styles.card}>

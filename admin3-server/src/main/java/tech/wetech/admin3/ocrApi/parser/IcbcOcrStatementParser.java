@@ -41,6 +41,11 @@ public final class IcbcOcrStatementParser {
   private static final Pattern P_DATE = Pattern.compile("^(\\d{4})-(\\d{2})-(\\d{2})$");
   private static final Pattern P_TIME = Pattern.compile("^(\\d{1,2}):(\\d{2}):(\\d{2})$");
   private static final Pattern P_HOLDER = Pattern.compile("户名\\s*[：:]\\s*([^\\s：:]+)");
+  /** 页脚合计（兼容千分位点号：67.757.51） */
+  private static final Pattern P_FOOTER_INCOME = Pattern.compile("本页收入算术合计[：:]*([\\d.,]+)");
+  private static final Pattern P_FOOTER_EXPENSE = Pattern.compile("本页支出算术合计[：:]*([\\d.,]+)");
+  private static final Pattern P_FOOTER_COUNT = Pattern.compile("本页交易笔数[：:]*([\\d]+)");
+  private static final BigDecimal CENT = new BigDecimal("0.01");
 
   private IcbcOcrStatementParser() {}
 
@@ -59,6 +64,7 @@ public final class IcbcOcrStatementParser {
     String accountNo = null;
     LocalDate earliest = null;
     LocalDate latest = null;
+    BigDecimal carryBalance = null;
 
     for (int p = 0; p < pages.length(); p++) {
       JSONObject page = pages.optJSONObject(p);
@@ -75,6 +81,7 @@ public final class IcbcOcrStatementParser {
         JSONArray body = table.optJSONArray("body");
         if (body == null || body.length() == 0) continue;
 
+        List<TransactionDTO> pageTxs = new ArrayList<>();
         for (List<JSONObject> row : groupRows(body).values()) {
           if (isHeaderRow(row)) {
             columnMap = buildColumnMap(row);
@@ -83,7 +90,7 @@ public final class IcbcOcrStatementParser {
           TransactionDTO tx = toTransaction(row, columnMap);
           if (tx == null) continue;
 
-          transactions.add(tx);
+          pageTxs.add(tx);
           raw.append(rowText(row)).append('\n');
 
           if (tx.getTransDate() != null) {
@@ -94,6 +101,10 @@ public final class IcbcOcrStatementParser {
             accountNo = cell(row, columnMap, "账号");
           }
         }
+
+        // 逐页用「本页收入/支出算术合计」校正金额与余额的解释
+        carryBalance = reconcilePage(pageTxs, carryBalance, readFooter(table));
+        transactions.addAll(pageTxs);
       }
     }
 
@@ -105,9 +116,6 @@ public final class IcbcOcrStatementParser {
     // 页眉起止日期优先；缺失时用首末笔交易日期兜底
     if (header.getStartDate() == null) header.setStartDate(earliest);
     if (header.getEndDate() == null) header.setEndDate(latest);
-
-    // OCR 会把小数点/负号识别错，用相邻余额差交叉校正
-    reconcileWithBalance(transactions);
 
     fillSummary(transactions, summary);
 
@@ -327,53 +335,188 @@ public final class IcbcOcrStatementParser {
   }
 
   /**
-   * 用相邻余额差校正 OCR 金额。
+   * 逐页用「本页收入/支出算术合计」约束校正金额与余额。
    *
-   * <p>OCR 常见错误：千分位点号错位（{@code 4,560.44} → {@code 4560440}）、负号丢失。
-   * 每笔交易都带余额，因此可用 {@code balance[i] - balance[i-1]} 反推金额。
+   * <p>正常情况下 {@code prevBalance + amount = balance}。两边对不上时有两种解释：
+   * <ul>
+   *   <li>金额对、余额丢位（如 7,045.38 被识别成 045.38）；</li>
+   *   <li>余额对、金额错位。</li>
+   * </ul>
+   * 单行无法判断，但页脚有本页收支合计：枚举有歧义行的两种解释，选能让本页合计对上的一种。
+   * 歧义行超过 4 个或没有页脚合计时，退回原有启发式（金额/余额数字串前缀相似则修余额，否则修金额）。
    *
-   * <p>判定逻辑：若原金额与余额差不等，先看"余额是否疑似错"（原余额与 prev+amount
-   * 的数字串高度相似，只差小数点/位数），是则修余额；否则修金额。
+   * @param carryIn 上一页最后一笔余额
+   * @return 本页最后一笔余额
    */
-  private static void reconcileWithBalance(List<TransactionDTO> txs) {
-    BigDecimal prevBalance = null;
-    for (TransactionDTO tx : txs) {
-      BigDecimal amount = tx.getAmount();
-      BigDecimal balance = tx.getBalance();
+  private static BigDecimal reconcilePage(List<TransactionDTO> txs, BigDecimal carryIn, PageFooter footer) {
+    if (txs.isEmpty()) {
+      return carryIn;
+    }
+    int n = txs.size();
+    BigDecimal[] origAmount = new BigDecimal[n];
+    BigDecimal[] origBalance = new BigDecimal[n];
+    List<Integer> ambiguous = new ArrayList<>();
+    List<Boolean> defaultTrustAmount = new ArrayList<>();
 
-      if (prevBalance != null) {
-        if (amount != null && balance != null) {
-          BigDecimal delta = balance.subtract(prevBalance);
-          if (delta.compareTo(amount) != 0) {
-            BigDecimal expectBalance = prevBalance.add(amount);
-            if (digitsSimilar(balance, expectBalance)) {
-              // 金额可信，余额小数点位错 → 修正余额
-              balance = expectBalance;
-              tx.setBalance(balance);
-            } else {
-              // 余额可信（或两者都不可信时以余额链为准）→ 修正金额
-              amount = delta;
-              tx.setAmount(amount);
-            }
-          }
-        } else if (amount == null && balance != null) {
-          amount = balance.subtract(prevBalance);
-          tx.setAmount(amount);
-        } else if (amount != null) {
-          balance = prevBalance.add(amount);
-          tx.setBalance(balance);
+    BigDecimal prev = carryIn;
+    for (int i = 0; i < n; i++) {
+      TransactionDTO tx = txs.get(i);
+      origAmount[i] = tx.getAmount();
+      origBalance[i] = tx.getBalance();
+      if (prev != null && tx.getAmount() != null && tx.getBalance() != null
+        && prev.add(tx.getAmount()).subtract(tx.getBalance()).abs().compareTo(CENT) > 0) {
+        ambiguous.add(i);
+        defaultTrustAmount.add(digitsSimilar(tx.getBalance(), prev.add(tx.getAmount())));
+      }
+      if (tx.getBalance() != null) {
+        prev = tx.getBalance();
+      } else if (tx.getAmount() != null && prev != null) {
+        prev = prev.add(tx.getAmount());
+      }
+    }
+
+    BigDecimal end = applyVariants(txs, carryIn, ambiguous, defaultTrustAmount, 0, origAmount, origBalance);
+    if (footer == null || ambiguous.isEmpty() || ambiguous.size() > 4 || pageMatches(txs, footer)) {
+      return end;
+    }
+    // 按翻转位数从少到多尝试，找到与页脚合计一致的组合
+    int k = ambiguous.size();
+    for (int flips = 1; flips <= k; flips++) {
+      for (int mask = 0; mask < (1 << k); mask++) {
+        if (Integer.bitCount(mask) != flips) {
+          continue;
+        }
+        end = applyVariants(txs, carryIn, ambiguous, defaultTrustAmount, mask, origAmount, origBalance);
+        if (pageMatches(txs, footer)) {
+          return end;
         }
       }
+    }
+    // 都匹配不上：恢复默认解释
+    return applyVariants(txs, carryIn, ambiguous, defaultTrustAmount, 0, origAmount, origBalance);
+  }
 
+  /**
+   * 按指定解释组合重算本页：flipMask 的第 i 位表示翻转第 i 个歧义行的默认选择。
+   */
+  private static BigDecimal applyVariants(List<TransactionDTO> txs, BigDecimal carryIn,
+                                          List<Integer> ambiguous, List<Boolean> defaultTrustAmount,
+                                          int flipMask, BigDecimal[] origAmount, BigDecimal[] origBalance) {
+    BigDecimal prev = carryIn;
+    int ambIdx = 0;
+    for (int i = 0; i < txs.size(); i++) {
+      TransactionDTO tx = txs.get(i);
+      BigDecimal amount = origAmount[i];
+      BigDecimal balance = origBalance[i];
+      boolean isAmbiguous = ambIdx < ambiguous.size() && ambiguous.get(ambIdx) == i;
+      if (isAmbiguous) {
+        boolean flip = (flipMask & (1 << ambIdx)) != 0;
+        boolean trustAmount = defaultTrustAmount.get(ambIdx) ^ flip;
+        if (prev != null) {
+          if (trustAmount && amount != null) {
+            balance = prev.add(amount);
+          } else if (balance != null) {
+            amount = balance.subtract(prev);
+          }
+        }
+        ambIdx++;
+      } else if (prev != null) {
+        if (amount != null && balance == null) {
+          balance = prev.add(amount);
+        } else if (amount == null && balance != null) {
+          amount = balance.subtract(prev);
+        }
+      }
+      tx.setAmount(amount);
+      tx.setBalance(balance);
       if (amount != null) {
         tx.setDirection(amount.signum() < 0 ? "出" : "入");
         tx.setAmountSignExplicit(true);
       }
-      if (balance != null) prevBalance = balance;
+      if (balance != null) {
+        prev = balance;
+      } else if (amount != null && prev != null) {
+        prev = prev.add(amount);
+      }
     }
+    return prev;
   }
 
-  /** 去掉符号和小数点后比较数字串：相等，或前缀关系且位数差 ≤2（即仅小数点位错/丢尾零） */
+  /** 本页解析结果是否与页脚「本页收入/支出算术合计」一致 */
+  private static boolean pageMatches(List<TransactionDTO> txs, PageFooter footer) {
+    BigDecimal income = BigDecimal.ZERO;
+    BigDecimal expense = BigDecimal.ZERO;
+    for (TransactionDTO tx : txs) {
+      BigDecimal amount = tx.getAmount();
+      if (amount == null || amount.signum() == 0) {
+        continue;
+      }
+      if (amount.signum() > 0) {
+        income = income.add(amount);
+      } else {
+        expense = expense.add(amount.negate());
+      }
+    }
+    boolean checked = false;
+    if (footer.income != null) {
+      checked = true;
+      if (income.subtract(footer.income).abs().compareTo(CENT) > 0) {
+        return false;
+      }
+    }
+    if (footer.expense != null) {
+      checked = true;
+      if (expense.subtract(footer.expense).abs().compareTo(CENT) > 0) {
+        return false;
+      }
+    }
+    return checked;
+  }
+
+  /** 读取页脚合计：本页收入/支出算术合计、本页交易笔数 */
+  private static PageFooter readFooter(JSONObject table) {
+    JSONArray footer = table.optJSONArray("footer");
+    if (footer == null) {
+      return null;
+    }
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i < footer.length(); i++) {
+      JSONObject item = footer.optJSONObject(i);
+      if (item != null) {
+        sb.append(item.optString("words", "")).append(' ');
+      }
+    }
+    String text = sb.toString().replaceAll("[\\s\\u3000]", "");
+    BigDecimal income = findAmount(P_FOOTER_INCOME, text);
+    BigDecimal expense = findAmount(P_FOOTER_EXPENSE, text);
+    Integer count = null;
+    Matcher cm = P_FOOTER_COUNT.matcher(text);
+    if (cm.find()) {
+      try {
+        count = Integer.parseInt(cm.group(1));
+      } catch (NumberFormatException ignored) {
+        // 笔数解析失败不影响金额校验
+      }
+    }
+    if (income == null && expense == null) {
+      return null;
+    }
+    return new PageFooter(income, expense, count);
+  }
+
+  private static BigDecimal findAmount(Pattern pattern, String text) {
+    Matcher m = pattern.matcher(text);
+    return m.find() ? parseAmount(m.group(1)) : null;
+  }
+
+  private record PageFooter(BigDecimal income, BigDecimal expense, Integer count) {
+  }
+
+  /**
+   * 去掉符号和小数点后比较数字串：相等，或前缀关系且位数差 ≤2（即仅小数点位错/丢尾零）。
+   * 注意：不做后缀匹配——丢前导位（7045.38 → 045.38）无法只靠本行判断，
+   * 交给逐页「本页收支合计」约束来纠错。
+   */
   private static boolean digitsSimilar(BigDecimal a, BigDecimal b) {
     if (a == null || b == null) return false;
     String sa = digits(a);

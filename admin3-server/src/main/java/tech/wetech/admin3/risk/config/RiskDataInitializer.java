@@ -19,6 +19,8 @@ public class RiskDataInitializer implements ApplicationRunner {
 
   @Override
   public void run(ApplicationArguments args) {
+    // 先确保唯一键排序规则正确，再补齐预置数据
+    riskDatabaseService.ensureSchema();
     riskDatabaseService.ensurePresets();
   }
 }
